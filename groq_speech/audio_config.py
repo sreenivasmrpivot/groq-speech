@@ -151,7 +151,7 @@ class AudioConfig:
         Returns:
             Audio data as numpy array
         """
-        if not self._audio_data is not None:
+        if self._audio_data is None:
             raise RuntimeError("No audio file loaded")
         
         return self._audio_data
@@ -175,7 +175,7 @@ class AudioConfig:
         Returns:
             List of audio chunks as numpy arrays
         """
-        if not self._audio_data is not None:
+        if self._audio_data is None:
             raise RuntimeError("No audio file loaded")
         
         chunk_size = int(self.sample_rate * chunk_duration)
