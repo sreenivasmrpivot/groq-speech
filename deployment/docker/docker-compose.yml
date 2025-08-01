@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Main API Server
+  # Main API Server (FastAPI)
   groq-speech-api:
     build:
       context: ../..
@@ -20,6 +20,7 @@ services:
       - ENABLE_SEMANTIC_SEGMENTATION=${ENABLE_SEMANTIC_SEGMENTATION:-true}
       - ENABLE_LANGUAGE_IDENTIFICATION=${ENABLE_LANGUAGE_IDENTIFICATION:-true}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
     volumes:
       - ../../logs:/app/logs
       - ../../temp:/app/temp
@@ -28,13 +29,39 @@ services:
       - groq-speech-network
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     depends_on:
       - redis
+    command: ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  # Web Demo Server (Flask)
+  groq-speech-web-demo:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.web
+    container_name: groq-speech-web-demo
+    ports:
+      - "5000:5000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_API_BASE_URL=${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}
+      - FLASK_ENV=production
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ../../logs:/app/logs
+    networks:
+      - groq-speech-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Redis for caching and session management
   redis:
@@ -49,7 +76,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -69,8 +96,9 @@ services:
     restart: unless-stopped
     depends_on:
       - groq-speech-api
+      - groq-speech-web-demo
     healthcheck:
-      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health" ]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -151,7 +179,7 @@ services:
       - groq-speech-network
     profiles:
       - test
-    command: [ "pytest", "-v", "--cov=groq_speech", "--cov=api" ]
+    command: ["pytest", "-v", "--cov=groq_speech", "--cov=api"]
 
 networks:
   groq-speech-network:

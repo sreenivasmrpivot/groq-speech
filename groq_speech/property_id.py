@@ -52,4 +52,11 @@ class PropertyId(Enum):
     # Real-time properties
     Speech_Recognition_EnableRealTimeTranscription = "Speech_Recognition_EnableRealTimeTranscription"
     Speech_Recognition_EnablePunctuation = "Speech_Recognition_EnablePunctuation"
-    Speech_Recognition_EnableProfanityFilter = "Speech_Recognition_EnableProfanityFilter" 
+    Speech_Recognition_EnableProfanityFilter = "Speech_Recognition_EnableProfanityFilter"
+    
+    # Groq API specific properties
+    Speech_Recognition_GroqModelId = "Speech_Recognition_GroqModelId"
+    Speech_Recognition_ResponseFormat = "Speech_Recognition_ResponseFormat"
+    Speech_Recognition_Temperature = "Speech_Recognition_Temperature"
+    Speech_Recognition_Prompt = "Speech_Recognition_Prompt"
+    Speech_Recognition_EnableSegmentTimestamps = "Speech_Recognition_EnableSegmentTimestamps" 

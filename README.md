@@ -15,6 +15,8 @@ A Python SDK for Groq's speech services, providing real-time speech-to-text capa
 
 ## Installation
 
+### Quick Start
+
 1. Clone the repository:
 ```bash
 git clone <repository-url>
@@ -41,6 +43,39 @@ GROQ_API_KEY=your-groq-api-key-here
 ```
 
 You can get your API key from [Groq Console](https://console.groq.com/).
+
+### Docker Deployment
+
+For production deployment, use Docker:
+
+```bash
+# Build and run with Docker Compose
+docker-compose -f deployment/docker/docker-compose.yml up -d
+
+# Access the API server
+curl http://localhost:8000/health
+
+# Access the web demo
+open http://localhost:5000
+```
+
+### API Server
+
+Run the FastAPI server for production use:
+
+```bash
+# Start the API server
+python -m api.server
+
+# Or with uvicorn
+uvicorn api.server:app --host 0.0.0.0 --port 8000
+```
+
+The API server provides:
+- REST API endpoints
+- WebSocket real-time recognition
+- Interactive documentation at `/docs`
+- Health monitoring at `/health`
 
 ## Quick Start
 
@@ -284,12 +319,36 @@ speech_config.endpoint_id = "YourEndpointId"
 speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config)
 ```
 
-## Examples
+## Examples & Demos
 
-See the `examples/` directory for complete working examples:
+The SDK includes comprehensive real-world demonstration applications:
+
+### Desktop Applications
+
+- **Voice Assistant Demo** (`examples/voice_assistant_demo.py`): Interactive GUI application with command processing
+- **Transcription Workbench** (`examples/transcription_workbench.py`): Professional transcription tool with analysis
+
+### Web Applications
+
+- **Web Demo** (`examples/web_demo.py`): Modern web interface with real-time statistics
+
+### Basic Examples
 
 - `basic_recognition.py`: Basic single-shot recognition examples
 - `continuous_recognition.py`: Continuous recognition with event handling
+
+### Running Demos
+
+```bash
+# Voice Assistant (Desktop GUI)
+python examples/voice_assistant_demo.py
+
+# Transcription Workbench (Desktop GUI)
+python examples/transcription_workbench.py
+
+# Web Demo (Browser-based)
+python examples/web_demo.py
+```
 
 ## Supported Languages
 

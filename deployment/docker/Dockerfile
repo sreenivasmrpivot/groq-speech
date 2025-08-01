@@ -57,12 +57,13 @@ WORKDIR /app
 # Copy application code
 COPY groq_speech/ ./groq_speech/
 COPY api/ ./api/
-COPY config/ ./config/
+COPY examples/ ./examples/
 COPY deployment/docker/entrypoint.sh ./
 
 # Copy configuration files
 COPY .env.example .env
 COPY requirements.txt ./
+COPY setup.py ./
 
 # Set ownership
 RUN chown -R groq:groq /app

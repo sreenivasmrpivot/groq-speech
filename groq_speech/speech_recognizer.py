@@ -11,10 +11,12 @@ import io
 from typing import Optional, Callable, List, Dict, Any
 import numpy as np
 import soundfile as sf
+import groq
 from .speech_config import SpeechConfig
 from .audio_config import AudioConfig
 from .result_reason import ResultReason, CancellationReason
 from .config import Config
+from .property_id import PropertyId
 
 
 class SpeechRecognitionResult:
@@ -25,7 +27,8 @@ class SpeechRecognitionResult:
     def __init__(self, text: str = "", reason: ResultReason = ResultReason.NoMatch, 
                  confidence: float = 0.0, language: str = "", 
                  cancellation_details: Optional['CancellationDetails'] = None,
-                 no_match_details: Optional['NoMatchDetails'] = None):
+                 no_match_details: Optional['NoMatchDetails'] = None,
+                 timestamps: Optional[List[Dict[str, Any]]] = None):
         """
         Initialize speech recognition result.
         
@@ -36,6 +39,7 @@ class SpeechRecognitionResult:
             language: Detected language
             cancellation_details: Details if recognition was canceled
             no_match_details: Details if no speech was recognized
+            timestamps: Word-level or segment-level timestamps
         """
         self.text = text
         self.reason = reason
@@ -43,6 +47,7 @@ class SpeechRecognitionResult:
         self.language = language
         self.cancellation_details = cancellation_details
         self.no_match_details = no_match_details
+        self.timestamps = timestamps or []
     
     def __str__(self):
         return f"SpeechRecognitionResult(text='{self.text}', reason={self.reason}, confidence={self.confidence})"
@@ -99,9 +104,12 @@ class SpeechRecognizer:
         self.speech_config = speech_config
         self.audio_config = audio_config
         
-        # Note: Groq client initialization is commented out due to compatibility issues
-        # In a production environment, you would initialize the Groq client here
-        # self.groq_client = groq.Groq(api_key=speech_config.api_key)
+        # Initialize Groq client with proper error handling
+        try:
+            # For newer versions of groq library, only pass api_key
+            self.groq_client = groq.Groq(api_key=speech_config.api_key)
+        except Exception as e:
+            raise Exception(f"Failed to initialize Groq client: {e}")
         
         # Event handlers
         self.recognizing_handlers: List[Callable] = []
@@ -117,6 +125,148 @@ class SpeechRecognizer:
         
         # Validate configuration
         self.speech_config.validate()
+    
+    def _preprocess_audio(self, audio_data: np.ndarray) -> np.ndarray:
+        """
+        Preprocess audio data for Groq API requirements.
+        
+        Args:
+            audio_data: Input audio data
+            
+        Returns:
+            Preprocessed audio data
+        """
+        # Ensure audio is mono
+        if len(audio_data.shape) > 1 and audio_data.shape[1] > 1:
+            audio_data = np.mean(audio_data, axis=1)
+        
+        # Resample to 16kHz if needed (Groq requirement)
+        target_sample_rate = 16000
+        current_sample_rate = self.audio_config.sample_rate if self.audio_config else 16000
+        
+        if current_sample_rate != target_sample_rate:
+            # Simple resampling (in production, use librosa or scipy)
+            ratio = target_sample_rate / current_sample_rate
+            new_length = int(len(audio_data) * ratio)
+            audio_data = np.interp(np.linspace(0, len(audio_data), new_length), 
+                                 np.arange(len(audio_data)), audio_data)
+        
+        return audio_data
+    
+    def _call_groq_transcription_api(self, audio_buffer: io.BytesIO, 
+                                   is_translation: bool = False) -> Dict[str, Any]:
+        """
+        Call Groq API for transcription or translation.
+        
+        Args:
+            audio_buffer: Audio data buffer
+            is_translation: Whether to use translation endpoint
+            
+        Returns:
+            API response as dictionary
+        """
+        try:
+            # Get configuration parameters
+            model = self.speech_config.get_property(PropertyId.Speech_Recognition_GroqModelId) or "whisper-large-v3-turbo"
+            language = self.speech_config.speech_recognition_language
+            response_format = self.speech_config.get_property(PropertyId.Speech_Recognition_ResponseFormat) or "verbose_json"
+            temperature = float(self.speech_config.get_property(PropertyId.Speech_Recognition_Temperature) or "0.0")
+            prompt = self.speech_config.get_property(PropertyId.Speech_Recognition_Prompt) or None
+            
+            # Prepare timestamp granularities
+            timestamp_granularities = []
+            if self.speech_config.get_property(PropertyId.Speech_Recognition_EnableWordLevelTimestamps) == "true":
+                timestamp_granularities.append("word")
+            if self.speech_config.get_property(PropertyId.Speech_Recognition_EnableSegmentTimestamps) == "true":
+                timestamp_granularities.append("segment")
+            
+            # Default to segment if no granularities specified
+            if not timestamp_granularities:
+                timestamp_granularities = ["segment"]
+            
+            # Prepare API parameters
+            api_params = {
+                "file": ("audio.wav", audio_buffer.getvalue(), "audio/wav"),
+                "model": model,
+                "response_format": response_format,
+                "timestamp_granularities": timestamp_granularities,
+                "temperature": temperature
+            }
+            
+            # Add language parameter (only for transcription, not translation)
+            if not is_translation and language:
+                # Convert language code format (e.g., "en-US" -> "en")
+                lang_code = language.split('-')[0] if '-' in language else language
+                api_params["language"] = lang_code
+            
+            # Add prompt if specified
+            if prompt:
+                api_params["prompt"] = prompt
+            
+            # Call appropriate API endpoint
+            if is_translation:
+                # Translation endpoint only supports 'en' language
+                api_params["language"] = "en"
+                response = self.groq_client.audio.translations.create(**api_params)
+            else:
+                response = self.groq_client.audio.transcriptions.create(**api_params)
+            
+            return response
+            
+        except Exception as e:
+            raise Exception(f"Groq API call failed: {str(e)}")
+    
+    def _parse_groq_response(self, response: Any, is_translation: bool = False) -> SpeechRecognitionResult:
+        """
+        Parse Groq API response into SpeechRecognitionResult.
+        
+        Args:
+            response: Groq API response
+            is_translation: Whether this was a translation response
+            
+        Returns:
+            Parsed recognition result
+        """
+        try:
+            # Extract text
+            text = getattr(response, 'text', '')
+            
+            # Extract confidence (if available)
+            confidence = getattr(response, 'confidence', 0.95)  # Default confidence
+            
+            # Extract language
+            language = getattr(response, 'language', self.speech_config.speech_recognition_language)
+            
+            # Extract timestamps if verbose_json format
+            timestamps = []
+            if hasattr(response, 'segments'):
+                for segment in response.segments:
+                    timestamp_info = {
+                        'start': getattr(segment, 'start', 0),
+                        'end': getattr(segment, 'end', 0),
+                        'text': getattr(segment, 'text', ''),
+                        'avg_logprob': getattr(segment, 'avg_logprob', 0),
+                        'compression_ratio': getattr(segment, 'compression_ratio', 0),
+                        'no_speech_prob': getattr(segment, 'no_speech_prob', 0)
+                    }
+                    timestamps.append(timestamp_info)
+            
+            return SpeechRecognitionResult(
+                text=text,
+                reason=ResultReason.RecognizedSpeech,
+                confidence=confidence,
+                language=language,
+                timestamps=timestamps
+            )
+            
+        except Exception as e:
+            return SpeechRecognitionResult(
+                reason=ResultReason.Canceled,
+                cancellation_details=CancellationDetails(
+                    CancellationReason.Error,
+                    f"Failed to parse API response: {str(e)}"
+                )
+            )
     
     def connect(self, event_type: str, handler: Callable):
         """
@@ -195,41 +345,33 @@ class SpeechRecognizer:
                 cancellation_details=cancellation_details
             )
     
-    def _recognize_audio_data(self, audio_data: np.ndarray) -> SpeechRecognitionResult:
+    def _recognize_audio_data(self, audio_data: np.ndarray, is_translation: bool = False) -> SpeechRecognitionResult:
         """
-        Recognize speech from audio data.
+        Recognize speech from audio data using Groq API.
         
         Args:
             audio_data: Audio data as numpy array
+            is_translation: Whether to use translation endpoint
             
         Returns:
             SpeechRecognitionResult
         """
         try:
+            # Preprocess audio
+            audio_data = self._preprocess_audio(audio_data)
+            
             # Save audio to temporary buffer
             buffer = io.BytesIO()
-            sf.write(buffer, audio_data, self.audio_config.sample_rate if self.audio_config else 16000, format='WAV')
+            sf.write(buffer, audio_data, 16000, format='WAV')  # Use 16kHz as per Groq requirements
             buffer.seek(0)
             
-            # For demonstration purposes, we'll simulate recognition
-            # In a real implementation, you would call the appropriate Groq API endpoint
-            # This simulates successful recognition for demo purposes
+            # Call Groq API
+            response = self._call_groq_transcription_api(buffer, is_translation)
             
-            # Simulate processing time
-            time.sleep(0.5)
+            # Parse response
+            result = self._parse_groq_response(response, is_translation)
             
-            # Simulate different results based on language
-            if self.speech_config.speech_recognition_language == "de-DE":
-                simulated_text = "Hallo, das ist ein simuliertes Spracherkennungsergebnis."
-            else:
-                simulated_text = "Hello, this is a simulated speech recognition result."
-            
-            return SpeechRecognitionResult(
-                text=simulated_text,
-                reason=ResultReason.RecognizedSpeech,
-                confidence=0.95,
-                language=self.speech_config.speech_recognition_language
-            )
+            return result
                 
         except Exception as e:
             cancellation_details = CancellationDetails(
@@ -240,6 +382,18 @@ class SpeechRecognizer:
                 reason=ResultReason.Canceled,
                 cancellation_details=cancellation_details
             )
+    
+    def translate_audio_data(self, audio_data: np.ndarray) -> SpeechRecognitionResult:
+        """
+        Translate audio to English text using Groq API.
+        
+        Args:
+            audio_data: Audio data as numpy array
+            
+        Returns:
+            SpeechRecognitionResult with English translation
+        """
+        return self._recognize_audio_data(audio_data, is_translation=True)
     
     def _recognize_from_microphone(self) -> SpeechRecognitionResult:
         """

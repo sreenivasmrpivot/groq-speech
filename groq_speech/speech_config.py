@@ -55,6 +55,13 @@ class SpeechConfig:
         self.set_property(PropertyId.Speech_SegmentationStrategy, "Silence")
         self.set_property(PropertyId.Speech_LogFilename, "")
         self.set_property(PropertyId.Speech_ServiceConnection_LogFilename, "")
+        
+        # Set default Groq API properties
+        self.set_property(PropertyId.Speech_Recognition_GroqModelId, "whisper-large-v3-turbo")
+        self.set_property(PropertyId.Speech_Recognition_ResponseFormat, "verbose_json")
+        self.set_property(PropertyId.Speech_Recognition_Temperature, "0.0")
+        self.set_property(PropertyId.Speech_Recognition_EnableWordLevelTimestamps, "true")
+        self.set_property(PropertyId.Speech_Recognition_EnableSegmentTimestamps, "true")
     
     def set_property(self, property_id: PropertyId, value: str):
         """
@@ -122,7 +129,7 @@ class SpeechConfig:
         elif self.host:
             return f"https://{self.host}"
         else:
-            return f"https://api.groq.com/openai/v1"
+            return "https://api.groq.com"
     
     def validate(self):
         """
