@@ -46,13 +46,23 @@ class Config:
 
     # Recognition Timeouts
     DEFAULT_TIMEOUT = int(os.getenv("DEFAULT_TIMEOUT", "30"))
-    DEFAULT_PHRASE_TIMEOUT = int(os.getenv("DEFAULT_PHRASE_TIMEOUT", "3"))
-    DEFAULT_SILENCE_TIMEOUT = int(os.getenv("DEFAULT_SILENCE_TIMEOUT", "1"))
+    DEFAULT_PHRASE_TIMEOUT = int(
+        os.getenv("DEFAULT_PHRASE_TIMEOUT", "5")
+    )  # Increased from 3
+    DEFAULT_SILENCE_TIMEOUT = int(
+        os.getenv("DEFAULT_SILENCE_TIMEOUT", "2")
+    )  # Increased from 1
 
     # Audio Processing Optimization
-    AUDIO_CHUNK_DURATION = float(os.getenv("AUDIO_CHUNK_DURATION", "0.5"))  # seconds
-    AUDIO_BUFFER_SIZE = int(os.getenv("AUDIO_BUFFER_SIZE", "8192"))  # bytes
-    AUDIO_SILENCE_THRESHOLD = float(os.getenv("AUDIO_SILENCE_THRESHOLD", "0.01"))
+    AUDIO_CHUNK_DURATION = float(
+        os.getenv("AUDIO_CHUNK_DURATION", "1.0")
+    )  # Increased from 0.5
+    AUDIO_BUFFER_SIZE = int(
+        os.getenv("AUDIO_BUFFER_SIZE", "16384")
+    )  # Increased from 8192
+    AUDIO_SILENCE_THRESHOLD = float(
+        os.getenv("AUDIO_SILENCE_THRESHOLD", "0.005")
+    )  # Reduced from 0.01
     AUDIO_VAD_ENABLED = os.getenv("AUDIO_VAD_ENABLED", "true").lower() == "true"
 
     # Performance Settings

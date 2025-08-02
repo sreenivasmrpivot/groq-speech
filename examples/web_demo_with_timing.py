@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Web Demo - Modern web interface for speech recognition
-Demonstrates a web-based speech recognition application using Flask.
+Enhanced Web Demo with Timing Metrics and Visual Charts
+Demonstrates a web-based speech recognition application with detailed performance tracking.
 """
 
 import os
 import sys
 import threading
 import time
+import json
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO
@@ -19,8 +20,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from groq_speech import SpeechConfig, SpeechRecognizer, ResultReason, Config
 
 
-class WebSpeechDemo:
-    """Web-based speech recognition demo."""
+class EnhancedWebSpeechDemo:
+    """Enhanced web-based speech recognition demo with timing metrics."""
 
     def __init__(self):
         self.app = Flask(__name__)
@@ -43,7 +44,7 @@ class WebSpeechDemo:
         @self.app.route("/")
         def index():
             """Main page."""
-            return render_template("index.html")
+            return render_template("enhanced_index.html")
 
         @self.app.route("/api/health")
         def health():
@@ -52,26 +53,14 @@ class WebSpeechDemo:
                 {
                     "status": "healthy",
                     "timestamp": datetime.now().isoformat(),
-                    "version": "1.0.0",
+                    "version": "2.0.0",
                 }
             )
 
-        @self.app.route("/api/recognize", methods=["POST"])
-        def recognize_audio():
-            """REST API endpoint for audio recognition."""
-            try:
-                # This would handle audio data from POST request
-                # For demo purposes, we'll simulate recognition
-                return jsonify(
-                    {
-                        "success": True,
-                        "text": "Demo recognition result",
-                        "confidence": 0.95,
-                        "language": "en-US",
-                    }
-                )
-            except Exception as e:
-                return jsonify({"success": False, "error": str(e)}), 500
+        @self.app.route("/api/performance")
+        def performance():
+            """Performance metrics endpoint."""
+            return jsonify(self.get_performance_metrics())
 
     def setup_socket_events(self):
         """Setup WebSocket events."""
@@ -84,6 +73,7 @@ class WebSpeechDemo:
                 "connected": True,
                 "start_time": datetime.now(),
                 "transcripts": [],
+                "timing_metrics": [],
                 "is_recognizing": False,
                 "is_translating": False,
             }
@@ -148,18 +138,28 @@ class WebSpeechDemo:
                                 return
 
                             if result.reason == ResultReason.RecognizedSpeech:
+                                # Extract timing metrics
+                                timing_data = {}
+                                if result.timing_metrics:
+                                    timing_data = result.timing_metrics.get_metrics()
+
                                 transcript = {
                                     "text": result.text,
                                     "confidence": result.confidence,
                                     "language": result.language,
                                     "timestamp": datetime.now().isoformat(),
                                     "type": "recognition",
+                                    "timing_metrics": timing_data,
+                                    "segment_id": len(session_data["transcripts"]) + 1,
                                 }
 
                                 if session_id in self.active_sessions:
                                     self.active_sessions[session_id][
                                         "transcripts"
                                     ].append(transcript)
+                                    self.active_sessions[session_id][
+                                        "timing_metrics"
+                                    ].append(timing_data)
 
                                 print(
                                     f"Emitting continuous recognition_result: {transcript}"
@@ -193,18 +193,28 @@ class WebSpeechDemo:
                         print(f"Recognition result: {result}")
 
                         if result.reason == ResultReason.RecognizedSpeech:
+                            # Extract timing metrics
+                            timing_data = {}
+                            if result.timing_metrics:
+                                timing_data = result.timing_metrics.get_metrics()
+
                             transcript = {
                                 "text": result.text,
                                 "confidence": result.confidence,
                                 "language": result.language,
                                 "timestamp": datetime.now().isoformat(),
                                 "type": "recognition",
+                                "timing_metrics": timing_data,
+                                "segment_id": 1,
                             }
 
                             if session_id in self.active_sessions:
                                 self.active_sessions[session_id]["transcripts"].append(
                                     transcript
                                 )
+                                self.active_sessions[session_id][
+                                    "timing_metrics"
+                                ].append(timing_data)
 
                             print(f"Emitting recognition_result: {transcript}")
                             self.socketio.emit(
@@ -241,142 +251,6 @@ class WebSpeechDemo:
                 "recognition_stopped", {"status": "stopped"}, room=session_id
             )
 
-        @self.socketio.on("start_translation")
-        def handle_start_translation(data):
-            """Start speech translation."""
-            session_id = request.sid
-            mode = data.get("mode", "once")  # "once" or "continuous"
-
-            if session_id not in self.active_sessions:
-                self.socketio.emit(
-                    "translation_error", {"error": "Session not found"}, room=session_id
-                )
-                return
-
-            session_data = self.active_sessions[session_id]
-            if session_data.get("is_recognizing") or session_data.get("is_translating"):
-                self.socketio.emit(
-                    "translation_error",
-                    {"error": "Already processing"},
-                    room=session_id,
-                )
-                return
-
-            session_data["is_translating"] = True
-            session_data["mode"] = mode
-
-            self.socketio.emit(
-                "translation_started",
-                {"status": "translating", "mode": mode},
-                room=session_id,
-            )
-
-            # Start translation in background
-            def translate():
-                try:
-                    print(
-                        f"Starting translation for session {session_id}, mode: {mode}"
-                    )
-
-                    if mode == "continuous":
-                        # Continuous translation
-                        def on_translation_recognized(result):
-                            if session_id not in self.active_sessions:
-                                return
-
-                            if result.reason == ResultReason.RecognizedSpeech:
-                                transcript = {
-                                    "text": result.text,
-                                    "confidence": result.confidence,
-                                    "language": result.language,
-                                    "timestamp": datetime.now().isoformat(),
-                                    "type": "translation",
-                                }
-
-                                if session_id in self.active_sessions:
-                                    self.active_sessions[session_id][
-                                        "transcripts"
-                                    ].append(transcript)
-
-                                print(
-                                    f"Emitting continuous translation_result: {transcript}"
-                                )
-                                # Use socketio.emit to work outside request context
-                                self.socketio.emit(
-                                    "translation_result", transcript, room=session_id
-                                )
-
-                        # Connect event handlers
-                        self.translator.connect("recognized", on_translation_recognized)
-
-                        # Start continuous recognition
-                        self.translator.start_continuous_recognition()
-
-                        # Keep running until stopped
-                        while (
-                            session_id in self.active_sessions
-                            and self.active_sessions[session_id].get("is_translating")
-                        ):
-                            time.sleep(0.1)
-
-                        # Stop continuous recognition
-                        self.translator.stop_continuous_recognition()
-                    else:
-                        # Single translation
-                        result = self.translator.recognize_once_async()
-                        print(f"Translation result: {result}")
-
-                        if result.reason == ResultReason.RecognizedSpeech:
-                            transcript = {
-                                "text": result.text,
-                                "confidence": result.confidence,
-                                "language": result.language,
-                                "timestamp": datetime.now().isoformat(),
-                                "type": "translation",
-                            }
-
-                            if session_id in self.active_sessions:
-                                self.active_sessions[session_id]["transcripts"].append(
-                                    transcript
-                                )
-
-                            print(f"Emitting translation_result: {transcript}")
-                            self.socketio.emit(
-                                "translation_result", transcript, room=session_id
-                            )
-                        else:
-                            print(
-                                f"No speech detected for translation: {result.reason}"
-                            )
-                            self.socketio.emit(
-                                "translation_error",
-                                {"error": "No speech detected"},
-                                room=session_id,
-                            )
-
-                except Exception as e:
-                    print(f"Translation error: {e}")
-                    self.socketio.emit(
-                        "translation_error", {"error": str(e)}, room=session_id
-                    )
-                finally:
-                    if session_id in self.active_sessions:
-                        self.active_sessions[session_id]["is_translating"] = False
-
-            thread = threading.Thread(target=translate)
-            thread.daemon = True
-            thread.start()
-
-        @self.socketio.on("stop_translation")
-        def handle_stop_translation():
-            """Stop speech translation."""
-            session_id = request.sid
-            if session_id in self.active_sessions:
-                self.active_sessions[session_id]["is_translating"] = False
-            self.socketio.emit(
-                "translation_stopped", {"status": "stopped"}, room=session_id
-            )
-
     def _stop_session_processing(self, session_id):
         """Stop any ongoing recognition or translation for a session."""
         if session_id in self.active_sessions:
@@ -384,19 +258,67 @@ class WebSpeechDemo:
             session_data["is_recognizing"] = False
             session_data["is_translating"] = False
 
+    def get_performance_metrics(self):
+        """Get performance metrics for all sessions."""
+        metrics = {
+            "total_sessions": len(self.active_sessions),
+            "total_transcripts": 0,
+            "avg_confidence": 0.0,
+            "timing_breakdown": {
+                "microphone_capture": [],
+                "api_call": [],
+                "response_processing": [],
+                "total_time": [],
+            },
+        }
+
+        total_confidence = 0.0
+        confidence_count = 0
+
+        for session_data in self.active_sessions.values():
+            metrics["total_transcripts"] += len(session_data["transcripts"])
+
+            for transcript in session_data["transcripts"]:
+                if "confidence" in transcript:
+                    total_confidence += transcript["confidence"]
+                    confidence_count += 1
+
+                if "timing_metrics" in transcript:
+                    timing = transcript["timing_metrics"]
+                    for key in metrics["timing_breakdown"]:
+                        if key in timing:
+                            metrics["timing_breakdown"][key].append(timing[key])
+
+        if confidence_count > 0:
+            metrics["avg_confidence"] = total_confidence / confidence_count
+
+        # Calculate averages for timing metrics
+        for key in metrics["timing_breakdown"]:
+            values = metrics["timing_breakdown"][key]
+            if values:
+                metrics["timing_breakdown"][key] = {
+                    "avg": sum(values) / len(values),
+                    "min": min(values),
+                    "max": max(values),
+                    "count": len(values),
+                }
+
+        return metrics
+
     def create_templates(self):
         """Create HTML templates."""
         templates_dir = os.path.join(os.path.dirname(__file__), "templates")
         os.makedirs(templates_dir, exist_ok=True)
 
-        # Create index.html
-        index_html = """<!DOCTYPE html>
+        # Create enhanced index.html with charts
+        enhanced_index_html = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Groq Speech Web Demo</title>
+    <title>Groq Speech Web Demo - Enhanced with Timing</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
             margin: 0;
@@ -412,7 +334,7 @@ class WebSpeechDemo:
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
         }
@@ -575,6 +497,40 @@ class WebSpeechDemo:
             color: #666;
         }
         
+        .timing-metrics {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 0.8rem;
+        }
+        
+        .timing-bar {
+            width: 100%;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 5px 0;
+        }
+        
+        .timing-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .timing-fill.microphone {
+            background: linear-gradient(90deg, #4caf50, #8bc34a);
+        }
+        
+        .timing-fill.api {
+            background: linear-gradient(90deg, #2196f3, #03a9f4);
+        }
+        
+        .timing-fill.processing {
+            background: linear-gradient(90deg, #ff9800, #ffc107);
+        }
+        
         .confidence-bar {
             width: 100%;
             height: 8px;
@@ -588,6 +544,27 @@ class WebSpeechDemo:
             height: 100%;
             background: linear-gradient(90deg, #28a745, #20c997);
             transition: width 0.3s ease;
+        }
+        
+        .charts-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .chart-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .chart-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #333;
         }
         
         .stats {
@@ -623,8 +600,12 @@ class WebSpeechDemo:
             margin-top: 30px;
         }
         
-        @media (max-width: 768px) {
+        @media (max-width: 1200px) {
             .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .charts-container {
                 grid-template-columns: 1fr;
             }
             
@@ -637,8 +618,8 @@ class WebSpeechDemo:
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎤 Groq Speech Web Demo</h1>
-            <p>Real-time speech recognition powered by Groq AI</p>
+            <h1>🎤 Groq Speech Web Demo - Enhanced</h1>
+            <p>Real-time speech recognition with detailed timing metrics</p>
         </div>
         
         <div class="main-content">
@@ -653,14 +634,13 @@ class WebSpeechDemo:
                         </select>
                     </div>
                     <button id="recordBtn" class="btn">🎤 Start Transcription</button>
-                    <button id="translateBtn" class="btn">🌐 Start Translation</button>
                     <button id="clearBtn" class="btn">🗑️ Clear</button>
                 </div>
                 <div id="status" class="status ready">Ready to record</div>
             </div>
             
             <div class="card">
-                <h2>📊 Statistics</h2>
+                <h2>📊 Performance Metrics</h2>
                 <div class="stats">
                     <div class="stat-item">
                         <div id="wordCount" class="stat-value">0</div>
@@ -675,24 +655,36 @@ class WebSpeechDemo:
                         <div class="stat-label">Avg Confidence</div>
                     </div>
                     <div class="stat-item">
-                        <div id="sessionTime" class="stat-value">0s</div>
-                        <div class="stat-label">Session Time</div>
+                        <div id="avgTotalTime" class="stat-value">0ms</div>
+                        <div class="stat-label">Avg Total Time</div>
                     </div>
                 </div>
             </div>
         </div>
         
         <div class="card">
-            <h2 id="transcriptTitle">📝 Live Transcript</h2>
+            <h2 id="transcriptTitle">📝 Live Transcript with Timing</h2>
             <div id="transcriptArea" class="transcript-area">
                 <div style="text-align: center; color: #666; margin-top: 50px;">
-                    Start recording to see transcriptions here...
+                    Start recording to see transcriptions with timing metrics...
                 </div>
             </div>
         </div>
         
+        <div class="charts-container">
+            <div class="chart-card">
+                <div class="chart-title">⏱️ Timing Breakdown</div>
+                <canvas id="timingChart" width="400" height="300"></canvas>
+            </div>
+            
+            <div class="chart-card">
+                <div class="chart-title">📈 Performance Trends</div>
+                <canvas id="performanceChart" width="400" height="300"></canvas>
+            </div>
+        </div>
+        
         <div class="footer">
-            <p>Built with Groq Speech SDK • Real-time AI-powered transcription</p>
+            <p>Built with Groq Speech SDK • Real-time AI-powered transcription with timing analysis</p>
         </div>
     </div>
 
@@ -702,7 +694,6 @@ class WebSpeechDemo:
         
         // DOM elements
         const recordBtn = document.getElementById('recordBtn');
-        const translateBtn = document.getElementById('translateBtn');
         const clearBtn = document.getElementById('clearBtn');
         const recognitionMode = document.getElementById('recognitionMode');
         const transcriptTitle = document.getElementById('transcriptTitle');
@@ -711,18 +702,120 @@ class WebSpeechDemo:
         const wordCount = document.getElementById('wordCount');
         const segmentCount = document.getElementById('segmentCount');
         const avgConfidence = document.getElementById('avgConfidence');
-        const sessionTime = document.getElementById('sessionTime');
+        const avgTotalTime = document.getElementById('avgTotalTime');
         
         // State
         let isRecording = false;
-        let isTranslating = false;
-        let sessionStartTime = null;
         let transcripts = [];
+        let timingData = [];
+        
+        // Charts
+        let timingChart = null;
+        let performanceChart = null;
+        
+        // Initialize charts
+        function initializeCharts() {
+            // Timing breakdown chart
+            const timingCtx = document.getElementById('timingChart').getContext('2d');
+            timingChart = new Chart(timingCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Microphone Capture', 'API Call', 'Response Processing'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: [
+                            '#4caf50',
+                            '#2196f3',
+                            '#ff9800'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed;
+                                    return label + ': ' + value.toFixed(2) + 'ms';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Performance trends chart
+            const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+            performanceChart = new Chart(performanceCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Total Time (ms)',
+                        data: [],
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'Confidence (%)',
+                        data: [],
+                        borderColor: '#28a745',
+                        backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Segment'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Time (ms)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Confidence (%)'
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        }
+                    }
+                }
+            });
+        }
         
         // Socket event handlers
         socket.on('connected', (data) => {
             console.log('Connected to server:', data.session_id);
             updateStatus('Connected to server', 'ready');
+            initializeCharts();
         });
         
         socket.on('recognition_started', (data) => {
@@ -733,6 +826,7 @@ class WebSpeechDemo:
             console.log('Received recognition_result:', data);
             addTranscript(data);
             updateStats();
+            updateCharts(data);
         });
         
         socket.on('recognition_stopped', (data) => {
@@ -743,38 +837,12 @@ class WebSpeechDemo:
             updateStatus('Error: ' + data.error, 'error');
         });
         
-        socket.on('translation_started', (data) => {
-            updateStatus('Translating... Speak now!', 'listening');
-        });
-        
-        socket.on('translation_result', (data) => {
-            console.log('Received translation_result:', data);
-            addTranscript(data);
-            updateStats();
-        });
-        
-        socket.on('translation_stopped', (data) => {
-            updateStatus('Translation stopped', 'ready');
-        });
-        
-        socket.on('translation_error', (data) => {
-            updateStatus('Translation Error: ' + data.error, 'error');
-        });
-        
         // Button event handlers
         recordBtn.addEventListener('click', () => {
-            if (!isRecording && !isTranslating) {
+            if (!isRecording) {
                 startRecording();
-            } else if (isRecording) {
+            } else {
                 stopRecording();
-            }
-        });
-        
-        translateBtn.addEventListener('click', () => {
-            if (!isTranslating && !isRecording) {
-                startTranslation();
-            } else if (isTranslating) {
-                stopTranslation();
             }
         });
         
@@ -787,9 +855,8 @@ class WebSpeechDemo:
             isRecording = true;
             recordBtn.textContent = '⏹️ Stop Transcription';
             recordBtn.classList.add('recording');
-            sessionStartTime = Date.now();
+            transcriptTitle.textContent = '🎤 Live Transcript with Timing';
             const mode = recognitionMode.value;
-            transcriptTitle.textContent = '🎤 Live Transcript';
             socket.emit('start_recognition', { mode: mode });
         }
         
@@ -797,26 +864,8 @@ class WebSpeechDemo:
             isRecording = false;
             recordBtn.textContent = '🎤 Start Transcription';
             recordBtn.classList.remove('recording');
-            transcriptTitle.textContent = '📝 Live Transcript';
+            transcriptTitle.textContent = '📝 Live Transcript with Timing';
             socket.emit('stop_recognition');
-        }
-        
-        function startTranslation() {
-            isTranslating = true;
-            translateBtn.textContent = '⏹️ Stop Translation';
-            translateBtn.classList.add('recording');
-            sessionStartTime = Date.now();
-            const mode = recognitionMode.value;
-            transcriptTitle.textContent = '🌐 Live Translation';
-            socket.emit('start_translation', { mode: mode });
-        }
-        
-        function stopTranslation() {
-            isTranslating = false;
-            translateBtn.textContent = '🌐 Start Translation';
-            translateBtn.classList.remove('recording');
-            transcriptTitle.textContent = '📝 Live Transcript';
-            socket.emit('stop_translation');
         }
         
         function updateStatus(message, type) {
@@ -830,21 +879,50 @@ class WebSpeechDemo:
             
             const confidencePercent = Math.round(data.confidence * 100);
             const timestamp = new Date(data.timestamp).toLocaleTimeString();
-            const isTranslation = data.type === 'translation';
+            
+            let timingHtml = '';
+            if (data.timing_metrics) {
+                const timing = data.timing_metrics;
+                const totalTime = timing.total_time || 0;
+                const micTime = timing.microphone_capture || 0;
+                const apiTime = timing.api_call || 0;
+                const procTime = timing.response_processing || 0;
+                
+                timingHtml = `
+                    <div class="timing-metrics">
+                        <strong>Timing Breakdown:</strong><br>
+                        <div>Microphone: ${(micTime * 1000).toFixed(1)}ms</div>
+                        <div class="timing-bar">
+                            <div class="timing-fill microphone" style="width: ${(micTime / totalTime * 100)}%"></div>
+                        </div>
+                        <div>API Call: ${(apiTime * 1000).toFixed(1)}ms</div>
+                        <div class="timing-bar">
+                            <div class="timing-fill api" style="width: ${(apiTime / totalTime * 100)}%"></div>
+                        </div>
+                        <div>Processing: ${(procTime * 1000).toFixed(1)}ms</div>
+                        <div class="timing-bar">
+                            <div class="timing-fill processing" style="width: ${(procTime / totalTime * 100)}%"></div>
+                        </div>
+                        <div><strong>Total: ${(totalTime * 1000).toFixed(1)}ms</strong></div>
+                    </div>
+                `;
+            }
             
             entry.innerHTML = `
                 <div class="transcript-text">
-                    ${isTranslation ? '🌐 ' : '🎤 '}${data.text}
+                    🎤 ${data.text}
                 </div>
                 <div class="transcript-meta">
-                    ${isTranslation ? 'Translation' : 'Recognition'} • 
+                    Recognition • 
                     Confidence: ${confidencePercent}% • 
                     Language: ${data.language || 'Unknown'} • 
-                    Time: ${timestamp}
+                    Time: ${timestamp} •
+                    Segment: ${data.segment_id || 1}
                 </div>
                 <div class="confidence-bar">
                     <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
                 </div>
+                ${timingHtml}
             `;
             
             transcriptArea.appendChild(entry);
@@ -856,11 +934,13 @@ class WebSpeechDemo:
         function clearTranscripts() {
             transcriptArea.innerHTML = `
                 <div style="text-align: center; color: #666; margin-top: 50px;">
-                    Start recording to see transcriptions here...
+                    Start recording to see transcriptions with timing metrics...
                 </div>
             `;
             transcripts = [];
+            timingData = [];
             updateStats();
+            updateCharts();
         }
         
         function updateStats() {
@@ -869,33 +949,60 @@ class WebSpeechDemo:
                 ? transcripts.reduce((sum, t) => sum + t.confidence, 0) / transcripts.length 
                 : 0;
             
+            let avgTotal = 0;
+            if (transcripts.length > 0) {
+                const totalTimes = transcripts
+                    .filter(t => t.timing_metrics && t.timing_metrics.total_time)
+                    .map(t => t.timing_metrics.total_time * 1000);
+                avgTotal = totalTimes.length > 0 ? totalTimes.reduce((a, b) => a + b) / totalTimes.length : 0;
+            }
+            
             wordCount.textContent = totalWords;
             segmentCount.textContent = transcripts.length;
             avgConfidence.textContent = Math.round(avgConf * 100) + '%';
-            
-            if (sessionStartTime) {
-                const elapsed = Math.round((Date.now() - sessionStartTime) / 1000);
-                sessionTime.textContent = elapsed + 's';
-            }
+            avgTotalTime.textContent = Math.round(avgTotal) + 'ms';
         }
         
-        // Update session time every second
-        setInterval(() => {
-            if (sessionStartTime) {
-                const elapsed = Math.round((Date.now() - sessionStartTime) / 1000);
-                sessionTime.textContent = elapsed + 's';
+        function updateCharts(data = null) {
+            if (data && data.timing_metrics) {
+                const timing = data.timing_metrics;
+                const micTime = (timing.microphone_capture || 0) * 1000;
+                const apiTime = (timing.api_call || 0) * 1000;
+                const procTime = (timing.response_processing || 0) * 1000;
+                
+                // Update timing breakdown chart
+                timingChart.data.datasets[0].data = [micTime, apiTime, procTime];
+                timingChart.update();
+                
+                // Update performance trends chart
+                const segmentNum = transcripts.length;
+                const totalTime = (timing.total_time || 0) * 1000;
+                const confidence = data.confidence * 100;
+                
+                performanceChart.data.labels.push(`S${segmentNum}`);
+                performanceChart.data.datasets[0].data.push(totalTime);
+                performanceChart.data.datasets[1].data.push(confidence);
+                
+                // Keep only last 10 segments
+                if (performanceChart.data.labels.length > 10) {
+                    performanceChart.data.labels.shift();
+                    performanceChart.data.datasets[0].data.shift();
+                    performanceChart.data.datasets[1].data.shift();
+                }
+                
+                performanceChart.update();
             }
-        }, 1000);
+        }
     </script>
 </body>
 </html>"""
 
-        with open(os.path.join(templates_dir, "index.html"), "w") as f:
-            f.write(index_html)
+        with open(os.path.join(templates_dir, "enhanced_index.html"), "w") as f:
+            f.write(enhanced_index_html)
 
     def run(self, host="localhost", port=5000, debug=False):
-        """Run the web demo."""
-        print(f"🌐 Starting Web Demo on http://{host}:{port}")
+        """Run the enhanced web demo."""
+        print(f"🌐 Starting Enhanced Web Demo on http://{host}:{port}")
         print("Opening browser automatically...")
 
         # Create templates
@@ -910,8 +1017,8 @@ class WebSpeechDemo:
 
 def main():
     """Main function."""
-    print("🌐 Starting Groq Speech Web Demo...")
-    print("This demo showcases a modern web interface for speech recognition.")
+    print("🌐 Starting Enhanced Groq Speech Web Demo...")
+    print("This demo showcases timing metrics and performance analysis.")
     print("Make sure your GROQ_API_KEY is set in the .env file.")
     print()
 
@@ -925,7 +1032,7 @@ def main():
         return
 
     try:
-        demo = WebSpeechDemo()
+        demo = EnhancedWebSpeechDemo()
         demo.run(host="0.0.0.0", port=5000, debug=True)
     except KeyboardInterrupt:
         print("\n👋 Demo interrupted by user.")

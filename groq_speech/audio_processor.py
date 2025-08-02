@@ -21,9 +21,10 @@ class VoiceActivityDetector:
         self,
         sample_rate: int = 16000,
         frame_duration: float = 0.03,
-        silence_threshold: float = 0.01,
-        speech_threshold: float = 0.1,
-        silence_duration: float = 0.5,
+        silence_threshold: float = 0.005,  # Better sensitivity
+        speech_threshold: float = 0.05,  # Better sensitivity
+        silence_duration: float = 1.0,  # More tolerance
+        speech_duration: float = 0.3,  # Min speech duration
     ):
         """
         Initialize VAD.
@@ -34,18 +35,23 @@ class VoiceActivityDetector:
             silence_threshold: Energy threshold for silence detection
             speech_threshold: Energy threshold for speech detection
             silence_duration: Minimum silence duration to trigger end of speech
+            speech_duration: Minimum speech duration to trigger start of speech
         """
         self.sample_rate = sample_rate
         self.frame_size = int(sample_rate * frame_duration)
         self.silence_threshold = silence_threshold
         self.speech_threshold = speech_threshold
         self.silence_duration = silence_duration
+        self.speech_duration = speech_duration
         self.silence_frames = int(silence_duration / frame_duration)
+        self.speech_frames = int(speech_duration / frame_duration)
 
         # State tracking
         self.is_speech = False
         self.silence_frame_count = 0
-        self.energy_history = deque(maxlen=10)
+        self.speech_frame_count = 0
+        self.energy_history = deque(maxlen=20)  # Better averaging
+        self.speech_start_time = None
 
     def detect_speech(self, audio_frame: np.ndarray) -> bool:
         """
@@ -64,16 +70,33 @@ class VoiceActivityDetector:
         # Calculate average energy over recent frames
         avg_energy = np.mean(list(self.energy_history))
 
-        # Update speech state
+        # Update speech state with hysteresis
         if avg_energy > self.speech_threshold:
-            self.is_speech = True
+            self.speech_frame_count += 1
             self.silence_frame_count = 0
+
+            # Only start speech if we've had enough speech frames
+            if self.speech_frame_count >= self.speech_frames:
+                if not self.is_speech:
+                    self.is_speech = True
+                    self.speech_start_time = time.time()
         elif avg_energy < self.silence_threshold:
             self.silence_frame_count += 1
+            self.speech_frame_count = 0
+
+            # Only end speech if we've had enough silence frames
             if self.silence_frame_count >= self.silence_frames:
-                self.is_speech = False
+                if self.is_speech:
+                    self.is_speech = False
+                    self.speech_start_time = None
 
         return self.is_speech
+
+    def get_speech_duration(self) -> float:
+        """Get duration of current speech segment."""
+        if self.is_speech and self.speech_start_time:
+            return time.time() - self.speech_start_time
+        return 0.0
 
 
 class OptimizedAudioProcessor:
@@ -90,6 +113,8 @@ class OptimizedAudioProcessor:
         buffer_size: int = 8192,
         enable_vad: bool = True,
         enable_compression: bool = True,
+        min_speech_duration: float = 0.5,  # Min speech duration
+        max_speech_duration: float = 30.0,  # Max speech duration
     ):
         """
         Initialize optimized audio processor.
@@ -101,6 +126,8 @@ class OptimizedAudioProcessor:
             buffer_size: Size of audio buffer in bytes
             enable_vad: Enable Voice Activity Detection
             enable_compression: Enable audio compression
+            min_speech_duration: Minimum speech duration to process
+            max_speech_duration: Maximum speech duration before processing
         """
         self.sample_rate = sample_rate
         self.channels = channels
@@ -108,14 +135,20 @@ class OptimizedAudioProcessor:
         self.buffer_size = buffer_size
         self.enable_vad = enable_vad
         self.enable_compression = enable_compression
+        self.min_speech_duration = min_speech_duration
+        self.max_speech_duration = max_speech_duration
 
         # Initialize VAD if enabled
         self.vad = VoiceActivityDetector(sample_rate) if enable_vad else None
 
-        # Audio buffers
-        self.audio_buffer = deque(maxlen=int(sample_rate * 10))  # 10 seconds buffer
+        # Audio buffers with improved sizing
+        self.audio_buffer = deque(
+            maxlen=int(sample_rate * 15)
+        )  # Increased to 15 seconds
         self.speech_buffer = deque()
         self.is_recording = False
+        self.speech_start_time = None
+        self.last_speech_time = None
 
         # Performance tracking
         self.processing_times = deque(maxlen=100)
@@ -142,25 +175,40 @@ class OptimizedAudioProcessor:
 
         # VAD processing if enabled
         if self.enable_vad and self.vad:
-            if not self.vad.detect_speech(audio_array):
-                # No speech detected, return None
-                self.processing_times.append(time.time() - start_time)
-                return None
+            is_speech = self.vad.detect_speech(audio_array)
 
-        # Extract chunk from buffer
-        if len(self.audio_buffer) >= self.chunk_size:
-            chunk = np.array(list(self.audio_buffer)[: self.chunk_size])
-            # Remove processed data from buffer
-            for _ in range(self.chunk_size):
-                self.audio_buffer.popleft()
+            if is_speech:
+                if not self.is_recording:
+                    self.is_recording = True
+                    self.speech_start_time = time.time()
+                self.last_speech_time = time.time()
 
-            # Preprocess chunk
-            processed_chunk = self._preprocess_chunk(chunk)
+                # Add to speech buffer
+                self.speech_buffer.extend(audio_array)
+            else:
+                # Check if we should process the speech buffer
+                if self.is_recording and self.speech_start_time:
+                    speech_duration = time.time() - self.speech_start_time
 
-            self.chunk_count += 1
-            self.processing_times.append(time.time() - start_time)
+                    # Process if we have enough speech or if silence has been detected
+                    if speech_duration >= self.min_speech_duration and (
+                        speech_duration >= self.max_speech_duration
+                        or time.time() - self.last_speech_time > 1.0
+                    ):
 
-            return processed_chunk
+                        # Extract speech data
+                        speech_data = np.array(list(self.speech_buffer))
+                        self.speech_buffer.clear()
+                        self.is_recording = False
+                        self.speech_start_time = None
+
+                        # Preprocess speech data
+                        processed_chunk = self._preprocess_chunk(speech_data)
+
+                        self.chunk_count += 1
+                        self.processing_times.append(time.time() - start_time)
+
+                        return processed_chunk
 
         self.processing_times.append(time.time() - start_time)
         return None
@@ -179,17 +227,17 @@ class OptimizedAudioProcessor:
         if len(chunk.shape) > 1 and chunk.shape[1] > 1:
             chunk = np.mean(chunk, axis=1)
 
-        # Apply noise reduction (simple high-pass filter)
+        # Apply gentle noise reduction
         chunk = self._apply_noise_reduction(chunk)
 
-        # Normalize audio levels
+        # Normalize audio levels with better handling
         chunk = self._normalize_audio(chunk)
 
         return chunk
 
     def _apply_noise_reduction(self, audio: np.ndarray) -> np.ndarray:
         """
-        Apply simple noise reduction using high-pass filter.
+        Apply gentle noise reduction using high-pass filter.
 
         Args:
             audio: Input audio
@@ -197,11 +245,10 @@ class OptimizedAudioProcessor:
         Returns:
             Noise-reduced audio
         """
-        # Simple high-pass filter to remove low-frequency noise
-        # This is a basic implementation - in production, use scipy.signal
+        # Gentle high-pass filter to remove low-frequency noise
         if len(audio) > 1:
-            # Simple first-order high-pass filter
-            alpha = 0.95
+            # Reduced alpha for gentler filtering
+            alpha = 0.98  # Increased from 0.95 for gentler filtering
             filtered = np.zeros_like(audio)
             filtered[0] = audio[0]
             for i in range(1, len(audio)):
@@ -226,11 +273,11 @@ class OptimizedAudioProcessor:
         rms = np.sqrt(np.mean(audio**2))
 
         if rms > 0:
-            # Normalize to target RMS
-            target_rms = 0.1
+            # Normalize to target RMS with gentler approach
+            target_rms = 0.15  # Increased from 0.1 for better volume
             gain = target_rms / rms
-            # Apply gain with limiting
-            gain = min(gain, 10.0)  # Prevent excessive amplification
+            # Apply gain with more conservative limiting
+            gain = min(gain, 5.0)  # Reduced from 10.0 for less aggressive amplification
             audio = audio * gain
 
         # Clip to prevent distortion
@@ -286,6 +333,7 @@ class OptimizedAudioProcessor:
             "total_chunks": self.chunk_count,
             "buffer_size": len(self.audio_buffer),
             "speech_buffer_size": len(self.speech_buffer),
+            "is_recording": self.is_recording,
         }
 
     def clear_buffers(self):
@@ -294,6 +342,9 @@ class OptimizedAudioProcessor:
         self.speech_buffer.clear()
         self.processing_times.clear()
         self.chunk_count = 0
+        self.is_recording = False
+        self.speech_start_time = None
+        self.last_speech_time = None
 
 
 class AudioChunker:

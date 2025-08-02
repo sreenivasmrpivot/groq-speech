@@ -20,6 +20,65 @@ from .config import Config
 from .property_id import PropertyId
 
 
+class TimingMetrics:
+    """Timing metrics for transcription pipeline."""
+
+    def __init__(self):
+        self.microphone_start = None
+        self.microphone_end = None
+        self.api_call_start = None
+        self.api_call_end = None
+        self.processing_start = None
+        self.processing_end = None
+        self.total_start = None
+        self.total_end = None
+
+    def start_microphone(self):
+        """Start microphone timing."""
+        self.microphone_start = time.time()
+        if not self.total_start:
+            self.total_start = self.microphone_start
+
+    def end_microphone(self):
+        """End microphone timing."""
+        self.microphone_end = time.time()
+
+    def start_api_call(self):
+        """Start API call timing."""
+        self.api_call_start = time.time()
+
+    def end_api_call(self):
+        """End API call timing."""
+        self.api_call_end = time.time()
+
+    def start_processing(self):
+        """Start response processing timing."""
+        self.processing_start = time.time()
+
+    def end_processing(self):
+        """End response processing timing."""
+        self.processing_end = time.time()
+        self.total_end = time.time()
+
+    def get_metrics(self) -> Dict[str, float]:
+        """Get all timing metrics."""
+        metrics = {}
+
+        if self.microphone_start and self.microphone_end:
+            metrics["microphone_capture"] = self.microphone_end - self.microphone_start
+
+        if self.api_call_start and self.api_call_end:
+            metrics["api_call"] = self.api_call_end - self.api_call_start
+
+        if self.processing_start and self.processing_end:
+            metrics["response_processing"] = self.processing_end - self.processing_start
+
+        if self.total_start and self.total_end:
+            metrics["total_time"] = self.total_end - self.total_start
+
+        return metrics
+
+
 class SpeechRecognitionResult:
     """
     Result of a speech recognition operation.
@@ -34,6 +93,7 @@ class SpeechRecognitionResult:
         cancellation_details: Optional["CancellationDetails"] = None,
         no_match_details: Optional["NoMatchDetails"] = None,
         timestamps: Optional[List[Dict[str, Any]]] = None,
+        timing_metrics: Optional[TimingMetrics] = None,
     ):
         """
         Initialize speech recognition result.
@@ -46,6 +106,7 @@ class SpeechRecognitionResult:
             cancellation_details: Details if recognition was canceled
             no_match_details: Details if no speech was recognized
             timestamps: Word-level or segment-level timestamps
+            timing_metrics: Timing metrics for the transcription pipeline
         """
         self.text = text
         self.reason = reason
@@ -54,6 +115,7 @@ class SpeechRecognitionResult:
         self.cancellation_details = cancellation_details
         self.no_match_details = no_match_details
         self.timestamps = timestamps or []
+        self.timing_metrics = timing_metrics
 
     def __str__(self):
         return f"SpeechRecognitionResult(text='{self.text}', reason={self.reason}, confidence={self.confidence})"
@@ -410,7 +472,12 @@ class SpeechRecognizer:
         Returns:
             SpeechRecognitionResult
         """
+        timing_metrics = TimingMetrics()
+
         try:
+            # Start API call timing
+            timing_metrics.start_api_call()
+
             # Preprocess audio
             audio_data = self._preprocess_audio(audio_data)
 
@@ -424,18 +491,34 @@ class SpeechRecognizer:
             # Call Groq API
             response = self._call_groq_transcription_api(buffer, is_translation)
 
+            # End API call timing
+            timing_metrics.end_api_call()
+
+            # Start processing timing
+            timing_metrics.start_processing()
+
             # Parse response
             result = self._parse_groq_response(response, is_translation)
+
+            # End processing timing
+            timing_metrics.end_processing()
+
+            # Add timing metrics to result
+            result.timing_metrics = timing_metrics
 
             return result
 
         except Exception as e:
+            timing_metrics.end_processing()
             cancellation_details = CancellationDetails(
                 CancellationReason.Error, f"Recognition failed: {str(e)}"
             )
-            return SpeechRecognitionResult(
-                reason=ResultReason.Canceled, cancellation_details=cancellation_details
+            result = SpeechRecognitionResult(
+                reason=ResultReason.Canceled,
+                cancellation_details=cancellation_details,
+                timing_metrics=timing_metrics,
             )
+            return result
 
     def translate_audio_data(self, audio_data: np.ndarray) -> SpeechRecognitionResult:
         """
@@ -459,26 +542,41 @@ class SpeechRecognizer:
         if not self.audio_config:
             self.audio_config = AudioConfig()
 
+        timing_metrics = TimingMetrics()
+        timing_metrics.start_microphone()
+
         try:
             print("Speak into your microphone...")
             print("(Press Ctrl+C to stop)")
 
-            # Collect audio for a longer duration to capture full speech
+            # Collect audio with improved parameters
             audio_chunks = []
             start_time = time.time()
-            max_duration = 15  # Increased to 15 seconds for better capture
+            max_duration = 20  # Increased to 20 seconds for better capture
+            silence_threshold = 0.5  # Seconds of silence to stop recording
 
             # Use the audio config to read audio
             with self.audio_config as audio:
                 print("Recording audio...")
+                last_audio_time = time.time()
+
                 while time.time() - start_time < max_duration:
                     try:
-                        chunk = audio.read_audio_chunk(
-                            2048
-                        )  # Increased chunk size for better audio capture
+                        chunk = audio.read_audio_chunk(4096)  # Increased chunk size
                         if chunk and len(chunk) > 0:
-                            audio_chunks.append(chunk)
-                            print(".", end="", flush=True)  # Show progress
+                            # Check if chunk contains audio (not just silence)
+                            audio_array = np.frombuffer(chunk, dtype=np.int16)
+                            audio_energy = np.mean(audio_array**2)
+
+                            if audio_energy > 100:  # Threshold for audio activity
+                                last_audio_time = time.time()
+                                audio_chunks.append(chunk)
+                                print(".", end="", flush=True)  # Show progress
+                            elif time.time() - last_audio_time > silence_threshold:
+                                # Stop if we've had silence for too long
+                                print("\nSilence detected, stopping recording")
+                                break
+
                     except KeyboardInterrupt:
                         print("\nStopped by user")
                         break
@@ -492,12 +590,15 @@ class SpeechRecognizer:
                     print(
                         "No audio captured. Please try speaking louder or check your microphone."
                     )
+                    timing_metrics.end_microphone()
                     return SpeechRecognitionResult(
                         reason=ResultReason.NoMatch,
                         no_match_details=NoMatchDetails("No audio captured"),
+                        timing_metrics=timing_metrics,
                     )
 
                 print(f"Captured {len(audio_chunks)} audio chunks")
+                timing_metrics.end_microphone()
 
                 # Combine audio chunks
                 audio_data = b"".join(audio_chunks)
@@ -512,12 +613,15 @@ class SpeechRecognizer:
                 return self._recognize_audio_data(audio_array)
 
         except Exception as e:
+            timing_metrics.end_microphone()
             self.performance_stats["failed_recognitions"] += 1
             cancellation_details = CancellationDetails(
                 CancellationReason.Error, f"Microphone recognition failed: {str(e)}"
             )
             return SpeechRecognitionResult(
-                reason=ResultReason.Canceled, cancellation_details=cancellation_details
+                reason=ResultReason.Canceled,
+                cancellation_details=cancellation_details,
+                timing_metrics=timing_metrics,
             )
 
     def start_continuous_recognition(self):
