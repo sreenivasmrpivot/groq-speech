@@ -44,15 +44,36 @@ recognizer.connect("recognized", on_recognized)
 recognizer.start_continuous_recognition()
 ```
 
-### Web Demo
+### Examples
+
+The project includes two complete end-to-end examples:
+
+#### 1. Web UI Example
+A modern Next.js web application with real-time speech recognition:
 
 ```bash
-# Run the web demo with timing metrics
-python examples/web_demo_timing.py
+# Start backend
+python -m api.server
 
-# Or run the basic web demo
-python examples/web_demo.py
+# Start frontend (in another terminal)
+cd examples/groq-speech-ui
+npm run dev
+# Open http://localhost:3000
 ```
+
+#### 2. CLI Example
+A command-line interface that directly uses the library:
+
+```bash
+# Set your API key
+export GROQ_API_KEY="your_groq_api_key_here"
+
+# Run CLI example
+cd examples
+python cli_speech_recognition.py --mode transcription --language en-US
+```
+
+See `examples/README.md` for detailed usage instructions.
 
 ## ✨ Key Features
 

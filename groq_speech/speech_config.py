@@ -44,6 +44,10 @@ class SpeechConfig:
 
         # Speech recognition settings
         self.speech_recognition_language = Config.DEFAULT_LANGUAGE
+        self.translation_target_language = (
+            "en"  # Default target language for translation
+        )
+        self.enable_translation = False  # Whether to use translation mode
         self.endpoint_id = None
 
         # Properties dictionary for custom settings
@@ -111,6 +115,15 @@ class SpeechConfig:
             language: Language code (e.g., 'en-US', 'de-DE', 'fr-FR')
         """
         self.speech_recognition_language = language
+
+    def set_translation_target_language(self, target_language: str):
+        """
+        Set the target language for translation.
+
+        Args:
+            target_language: Target language code (e.g., 'en', 'es', 'fr')
+        """
+        self.translation_target_language = target_language
 
     def set_endpoint_id(self, endpoint_id: str):
         """

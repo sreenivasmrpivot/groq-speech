@@ -21,8 +21,8 @@ class Config:
 
     # Model Configuration
     GROQ_MODEL_ID = os.getenv(
-        "GROQ_MODEL_ID", "whisper-large-v3-turbo"
-    )  # whisper-large-v3 or whisper-large-v3-turbo
+        "GROQ_MODEL_ID", "whisper-large-v3"
+    )  # whisper-large-v3 (supports translation) or whisper-large-v3-turbo (transcription only)
     GROQ_RESPONSE_FORMAT = os.getenv(
         "GROQ_RESPONSE_FORMAT", "verbose_json"
     )  # json, verbose_json, text

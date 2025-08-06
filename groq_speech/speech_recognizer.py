@@ -274,7 +274,6 @@ class SpeechRecognizer:
 
             # Get configuration parameters with environment overrides
             model = model_config["model_id"]
-            language = self.speech_config.speech_recognition_language
             response_format = model_config["response_format"]
             temperature = model_config["temperature"]
             prompt = (
@@ -302,19 +301,21 @@ class SpeechRecognizer:
                 "temperature": temperature,
             }
 
-            # Add language parameter (only for transcription, not translation)
-            if not is_translation and language:
-                # Convert language code format (e.g., "en-US" -> "en")
-                lang_code = language.split("-")[0] if "-" in language else language
-                api_params["language"] = lang_code
+            # Language auto-detected by Groq API - no need to specify
 
             # Add prompt if specified
             if prompt:
                 api_params["prompt"] = prompt
 
             # Call appropriate API endpoint
-            if is_translation:
-                # Translation endpoint only supports 'en' language
+            # Check if translation is enabled in config or passed as parameter
+            should_translate = is_translation or getattr(
+                self.speech_config, "enable_translation", False
+            )
+
+            if should_translate:
+                # For translation, set language to 'en' as required by Groq API
+                # The translations endpoint only supports 'en' as a parameter option
                 api_params["language"] = "en"
                 response = self.groq_client.audio.translations.create(**api_params)
             else:
@@ -346,9 +347,13 @@ class SpeechRecognizer:
             confidence = getattr(response, "confidence", 0.95)  # Default confidence
 
             # Extract language
-            language = getattr(
-                response, "language", self.speech_config.speech_recognition_language
-            )
+            if is_translation:
+                # For translation, the result is always in English
+                language = "en"
+            else:
+                language = getattr(
+                    response, "language", self.speech_config.speech_recognition_language
+                )
 
             # Extract timestamps if verbose_json format
             timestamps = []

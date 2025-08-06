@@ -1,12 +1,20 @@
-groq==0.30.0
-pyaudio==0.2.11
-numpy==1.24.3
-soundfile==0.12.1
-websockets==12.0
-asyncio-mqtt==0.16.1
-python-dotenv==1.0.0
-flask==2.3.3
-flask-socketio==5.3.6
-fastapi==0.104.1
-uvicorn==0.24.0
-pydantic==2.5.0 
+# Core dependencies
+groq>=0.4.0
+pyaudio>=0.2.11
+numpy>=1.21.0
+soundfile>=0.10.3
+python-dotenv>=0.19.0
+
+# Web demo dependencies
+flask>=2.0.0
+flask-socketio>=5.0.0
+webbrowser
+
+# Taipy for optimized web demo
+taipy>=3.0.0
+
+# Development dependencies
+pytest>=6.0.0
+pytest-cov>=2.10.0
+black>=21.0.0
+flake8>=3.8.0 

@@ -36,8 +36,10 @@ class RecognitionRequest(BaseModel):
     """Request model for speech recognition."""
 
     audio_data: Optional[str] = Field(None, description="Base64 encoded audio data")
-    language: Optional[str] = Field("en-US", description="Recognition language")
     model: Optional[str] = Field(None, description="Groq model to use")
+    target_language: Optional[str] = Field(
+        "en", description="Target language for translation"
+    )
     enable_timestamps: bool = Field(False, description="Enable word-level timestamps")
     enable_language_detection: bool = Field(
         False, description="Enable language detection"
@@ -111,13 +113,10 @@ app.add_middleware(
 )
 
 
-def get_speech_config(
-    language: str = "en-US", model: Optional[str] = None
-) -> SpeechConfig:
+def get_speech_config(model: Optional[str] = None) -> SpeechConfig:
     """Create speech configuration."""
     config = SpeechConfig()
-    if language:
-        config.speech_recognition_language = language
+    # Language auto-detected by Groq API
     if model:
         config.set_property("Speech_Recognition_GroqModelId", model)
     return config
@@ -152,29 +151,23 @@ async def health_check():
 
 @app.post("/api/v1/recognize", response_model=RecognitionResponse)
 async def recognize_speech(request: RecognitionRequest):
-    """REST API endpoint for speech recognition."""
+    """Recognize speech from audio data."""
     try:
-        # Validate API key
-        Config.get_api_key()
+        if not request.audio_data:
+            raise HTTPException(status_code=400, detail="Audio data is required")
 
-        # Create speech configuration
-        speech_config = get_speech_config(
-            language=request.language, model=request.model
-        )
-
-        # Enable additional features if requested
-        if request.enable_timestamps:
-            speech_config.set_property(
-                "Speech_Recognition_EnableWordLevelTimestamps", "true"
-            )
-
-        if request.enable_language_detection:
-            speech_config.set_property(
-                "Speech_Recognition_EnableLanguageIdentification", "true"
-            )
+        # Get speech configuration
+        speech_config = get_speech_config(request.model)
+        if request.target_language:
+            speech_config.set_translation_target_language(request.target_language)
 
         # Create recognizer
-        recognizer = SpeechRecognizer(speech_config=speech_config)
+        recognizer = SpeechRecognizer(speech_config)
+
+        # Decode audio data
+        import base64
+
+        audio_data = base64.b64decode(request.audio_data)
 
         # Perform recognition
         result = recognizer.recognize_once_async()
@@ -185,24 +178,56 @@ async def recognize_speech(request: RecognitionRequest):
                 text=result.text,
                 confidence=result.confidence,
                 language=result.language,
-                timestamps=result.timestamps,
+                timestamps=result.timestamps if request.enable_timestamps else None,
             )
         elif result.reason == ResultReason.NoMatch:
             return RecognitionResponse(success=False, error="No speech detected")
-        elif result.reason == ResultReason.Canceled:
-            error_msg = "Recognition canceled"
-            if result.cancellation_details:
-                error_msg += f": {result.cancellation_details.error_details}"
-            return RecognitionResponse(success=False, error=error_msg)
         else:
-            return RecognitionResponse(
-                success=False, error="Unknown recognition result"
-            )
+            return RecognitionResponse(success=False, error="Recognition failed")
 
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Recognition error: {str(e)}")
+        return RecognitionResponse(success=False, error=str(e))
+
+
+@app.post("/api/v1/translate", response_model=RecognitionResponse)
+async def translate_speech(request: RecognitionRequest):
+    """Translate speech from audio data."""
+    try:
+        if not request.audio_data:
+            raise HTTPException(status_code=400, detail="Audio data is required")
+
+        # Get speech configuration for translation
+        speech_config = get_speech_config(request.model)
+        speech_config.enable_translation = True  # Enable translation mode
+        if request.target_language:
+            speech_config.set_translation_target_language(request.target_language)
+
+        # Create recognizer
+        recognizer = SpeechRecognizer(speech_config)
+
+        # Decode audio data
+        import base64
+
+        audio_data = base64.b64decode(request.audio_data)
+
+        # Perform translation
+        result = recognizer.recognize_once_async()
+
+        if result.reason == ResultReason.RecognizedSpeech:
+            return RecognitionResponse(
+                success=True,
+                text=result.text,
+                confidence=result.confidence,
+                language=result.language,
+                timestamps=result.timestamps if request.enable_timestamps else None,
+            )
+        elif result.reason == ResultReason.NoMatch:
+            return RecognitionResponse(success=False, error="No speech detected")
+        else:
+            return RecognitionResponse(success=False, error="Translation failed")
+
+    except Exception as e:
+        return RecognitionResponse(success=False, error=str(e))
 
 
 @app.post("/api/v1/recognize-file")
@@ -375,17 +400,28 @@ async def handle_start_recognition(session_id: str, config: Dict[str, Any]):
                     language=config.get("language", "en-US"), model=config.get("model")
                 )
 
+                # Enable translation if requested
+                if config.get("is_translation", False):
+                    speech_config.enable_translation = True
+
                 # Create recognizer
                 recognizer = SpeechRecognizer(speech_config=speech_config)
 
                 # Perform recognition
                 result = recognizer.recognize_once_async()
 
-                # Send result via asyncio
-                asyncio.create_task(send_recognition_result(session_id, result))
+                # Use asyncio.run_coroutine_threadsafe to send result from thread
+                loop = asyncio.get_event_loop()
+                asyncio.run_coroutine_threadsafe(
+                    send_recognition_result(session_id, result), loop
+                )
 
             except Exception as e:
-                asyncio.create_task(send_recognition_error(session_id, str(e)))
+                # Use asyncio.run_coroutine_threadsafe to send error from thread
+                loop = asyncio.get_event_loop()
+                asyncio.run_coroutine_threadsafe(
+                    send_recognition_error(session_id, str(e)), loop
+                )
 
         # Run in thread
         thread = threading.Thread(target=recognize)
