@@ -11,6 +11,7 @@ import threading
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
+import time
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
@@ -25,7 +26,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from groq_speech import (
     SpeechConfig,
     SpeechRecognizer,
-    AudioConfig,
     ResultReason,
     Config,
 )
@@ -351,15 +351,23 @@ async def websocket_recognition(websocket: WebSocket):
         while True:
             # Receive message from client
             message = await websocket.receive_text()
+            print(f"Received WebSocket message: {message}")
             data = json.loads(message)
 
             if data["type"] == "start_recognition":
+                print(f"Starting recognition for session {session_id}")
                 await handle_start_recognition(session_id, data.get("data", {}))
             elif data["type"] == "stop_recognition":
+                print(f"Stopping recognition for session {session_id}")
                 await handle_stop_recognition(session_id)
+            elif data["type"] == "audio_data":
+                print(f"Processing audio data for session {session_id}")
+                await handle_audio_data(session_id, data.get("data", {}))
             elif data["type"] == "ping":
+                print(f"Ping received for session {session_id}")
                 await websocket.send_text(json.dumps({"type": "pong"}))
             else:
+                print(f"Unknown message type: {data['type']}")
                 await websocket.send_text(
                     json.dumps(
                         {"type": "error", "data": {"message": "Unknown message type"}}
@@ -387,6 +395,11 @@ async def handle_start_recognition(session_id: str, config: Dict[str, Any]):
         session = recognition_sessions[session_id]
         session["is_recording"] = True
 
+        # Store configuration in session for audio processing
+        session["current_model"] = config.get("model")
+        session["is_translation"] = config.get("is_translation", False)
+        session["target_language"] = config.get("target_language")
+
         # Send confirmation
         await session["websocket"].send_text(
             json.dumps({"type": "recognition_started", "data": {"status": "listening"}})
@@ -396,29 +409,52 @@ async def handle_start_recognition(session_id: str, config: Dict[str, Any]):
         def recognize():
             try:
                 # Create speech configuration
-                speech_config = get_speech_config(
-                    language=config.get("language", "en-US"), model=config.get("model")
-                )
+                speech_config = get_speech_config(model=config.get("model"))
 
                 # Enable translation if requested
                 if config.get("is_translation", False):
                     speech_config.enable_translation = True
+                    # Set target language if provided
+                    if config.get("target_language"):
+                        speech_config.set_translation_target_language(
+                            config.get("target_language")
+                        )
 
                 # Create recognizer
                 recognizer = SpeechRecognizer(speech_config=speech_config)
 
-                # Perform recognition
-                result = recognizer.recognize_once_async()
+                # For WebSocket, we need to wait for audio data from the client
+                # The actual recognition will happen when audio data is received
+                # For now, just send a "ready" message
+                try:
+                    # Try to get the current event loop (works in main thread)
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    # If no event loop in current thread, create a new one
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
 
-                # Use asyncio.run_coroutine_threadsafe to send result from thread
-                loop = asyncio.get_event_loop()
+                # Send ready message
                 asyncio.run_coroutine_threadsafe(
-                    send_recognition_result(session_id, result), loop
+                    session["websocket"].send_text(
+                        json.dumps(
+                            {"type": "ready", "data": {"status": "ready_for_audio"}}
+                        )
+                    ),
+                    loop,
                 )
 
             except Exception as e:
+                # Get the main event loop from the main thread
+                try:
+                    # Try to get the current event loop (works in main thread)
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    # If no event loop in current thread, create a new one
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
                 # Use asyncio.run_coroutine_threadsafe to send error from thread
-                loop = asyncio.get_event_loop()
                 asyncio.run_coroutine_threadsafe(
                     send_recognition_error(session_id, str(e)), loop
                 )
@@ -438,6 +474,217 @@ async def handle_stop_recognition(session_id: str):
         recognition_sessions[session_id]["is_recording"] = False
         await recognition_sessions[session_id]["websocket"].send_text(
             json.dumps({"type": "recognition_stopped", "data": {"status": "stopped"}})
+        )
+
+
+async def handle_audio_data(session_id: str, audio_data: Dict[str, Any]):
+    """Handle incoming audio data for recognition using groq_speech SDK - EXACTLY like CLI."""
+    import base64
+    import tempfile
+    import os
+
+    print(f"Received audio data for session {session_id}")
+
+    if session_id not in recognition_sessions:
+        print(f"Session {session_id} not found")
+        return
+
+    session = recognition_sessions[session_id]
+    print(f"Processing audio data for session {session_id}")
+
+    # Decode base64 audio data
+    audio_bytes = base64.b64decode(audio_data["audio_data"])
+    print(f"Decoded audio data: {len(audio_bytes)} bytes")
+
+    # Get the MIME type from the frontend
+    mime_type = audio_data.get("mime_type", "audio/webm")
+    print(f"Audio MIME type: {mime_type}")
+
+    # Initialize audio chunks list if it doesn't exist
+    if "audio_chunks" not in session:
+        session["audio_chunks"] = []
+        session["mime_type"] = mime_type
+        session["chunk_count"] = 0
+
+    # Add current chunk to the session
+    session["audio_chunks"].append(audio_bytes)
+    session["chunk_count"] += 1
+
+    print(
+        f"Accumulated {session['chunk_count']} audio chunks, total size: {sum(len(chunk) for chunk in session['audio_chunks'])} bytes"
+    )
+
+    # Only process when we have enough audio data
+    min_chunks = 3
+    min_total_size = 50000  # 50KB minimum for a valid audio file
+
+    if (
+        session["chunk_count"] >= min_chunks
+        and sum(len(chunk) for chunk in session["audio_chunks"]) >= min_total_size
+    ):
+
+        try:
+            # Combine all accumulated chunks
+            combined_audio = b"".join(session["audio_chunks"])
+            print(
+                f"Processing combined audio: {len(combined_audio)} bytes from {session['chunk_count']} chunks"
+            )
+
+            # Use groq_speech SDK EXACTLY like CLI example
+            from groq_speech import (
+                SpeechConfig,
+                SpeechRecognizer,
+                ResultReason,
+            )
+
+            # Setup speech configuration - EXACTLY like CLI
+            config = SpeechConfig()
+            model = session.get("current_model", "whisper-large-v3-turbo")
+            config.model = model
+
+            # Enable translation if requested - EXACTLY like CLI
+            is_translation = session.get("is_translation", False)
+            if is_translation:
+                config.enable_translation = True
+                target_language = session.get("target_language", "en")
+                config.set_translation_target_language(target_language)
+                print(f"🔀 Translation mode enabled (target: {target_language})")
+
+            print(
+                f"Using groq_speech SDK with model: {model}, translation: {is_translation}"
+            )
+
+            # Create temporary file for the combined audio data
+            audio_file_path = None
+
+            try:
+                # Save the combined audio as a temporary file
+                # Use the original format extension to maintain compatibility
+                if mime_type.startswith("audio/webm"):
+                    file_extension = ".webm"
+                elif mime_type.startswith("audio/ogg"):
+                    file_extension = ".ogg"
+                elif mime_type.startswith("audio/mp4"):
+                    file_extension = ".m4a"
+                else:
+                    file_extension = ".webm"  # Default
+
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=file_extension
+                ) as f:
+                    f.write(combined_audio)
+                    audio_file_path = f.name
+                    print(f"Created temporary audio file: {audio_file_path}")
+
+                # Create recognizer - EXACTLY like CLI
+                print("🎤 Starting recognition...")
+                start_time = time.time()
+
+                # Create recognizer - EXACTLY like CLI (no AudioConfig needed)
+                recognizer = SpeechRecognizer(config)
+
+                print(
+                    "Created SpeechRecognizer using groq_speech SDK - EXACTLY like CLI"
+                )
+
+                # Perform recognition - EXACTLY like CLI
+                result = recognizer.recognize_once_async()
+                print(f"Recognition result: {result.reason}")
+
+                processing_time = time.time() - start_time
+
+                # Process result - EXACTLY like CLI
+                if result.reason == ResultReason.RecognizedSpeech:
+                    print(f"✅ Recognition successful!")
+                    print(f"📝 Text: {result.text}")
+                    print(f"🎯 Confidence: {result.confidence:.2f}")
+                    print(f"🌍 Language: {result.language}")
+                    print(f"⏱️  Processing time: {processing_time:.2f}s")
+
+                    # Send the result back to the frontend
+                    await session["websocket"].send_text(
+                        json.dumps(
+                            {
+                                "type": "recognition_result",
+                                "data": {
+                                    "text": result.text,
+                                    "confidence": result.confidence or 0.95,
+                                    "language": result.language or "auto-detected",
+                                    "timestamps": result.timestamps or [],
+                                    "timing_metrics": {
+                                        "api_call": 0,
+                                        "response_processing": processing_time,
+                                        "total_time": processing_time,
+                                    },
+                                },
+                            }
+                        )
+                    )
+
+                elif result.reason == ResultReason.NoMatch:
+                    print("❌ No speech detected in the audio file")
+                    await session["websocket"].send_text(
+                        json.dumps(
+                            {
+                                "type": "recognition_error",
+                                "data": {"error": "No speech detected"},
+                            }
+                        )
+                    )
+
+                elif result.reason == ResultReason.Canceled:
+                    print(
+                        f"❌ Recognition canceled: {result.cancellation_details.error_details}"
+                    )
+                    await session["websocket"].send_text(
+                        json.dumps(
+                            {
+                                "type": "recognition_error",
+                                "data": {"error": "Recognition canceled"},
+                            }
+                        )
+                    )
+
+                # Clear accumulated chunks after successful processing
+                session["audio_chunks"] = []
+                session["chunk_count"] = 0
+                print("Cleared audio chunks after successful processing")
+
+            except Exception as e:
+                print(f"❌ Error during recognition: {e}")
+                await send_recognition_error(session_id, str(e))
+
+            finally:
+                # Clean up the temporary file if it was created
+                if audio_file_path and os.path.exists(audio_file_path):
+                    try:
+                        os.unlink(audio_file_path)
+                        print("Cleaned up temporary file")
+                    except Exception as cleanup_error:
+                        print(f"Error cleaning up temporary file: {cleanup_error}")
+
+        except Exception as e:
+            print(f"Error combining audio chunks: {e}")
+            await send_recognition_error(session_id, str(e))
+
+    else:
+        # Not enough chunks yet, just acknowledge receipt
+        print(
+            f"Accumulating audio chunks: {session['chunk_count']}/{min_chunks} chunks, {sum(len(chunk) for chunk in session['audio_chunks'])}/{min_total_size} bytes"
+        )
+        # Send acknowledgment that chunk was received
+        await session["websocket"].send_text(
+            json.dumps(
+                {
+                    "type": "chunk_received",
+                    "data": {
+                        "chunk_count": session["chunk_count"],
+                        "total_size": sum(
+                            len(chunk) for chunk in session["audio_chunks"]
+                        ),
+                    },
+                }
+            )
         )
 
 

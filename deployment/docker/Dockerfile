@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Groq Speech SDK API Server
-# Stage 1: Build stage
-FROM python:3.11-slim as builder
+# Stage 1: Build core SDK
+FROM python:3.11-slim as sdk-builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies for SDK
 RUN apt-get update && apt-get install -y \
     build-essential \
     libportaudio2 \
@@ -22,13 +22,42 @@ RUN apt-get update && apt-get install -y \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt requirements-dev.txt ./
+# Install core SDK dependencies
+COPY groq_speech/requirements.txt /tmp/sdk-requirements.txt
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt && \
-    pip install -r requirements-dev.txt
+    pip install -r /tmp/sdk-requirements.txt
 
-# Stage 2: Production stage
+# Copy and install core SDK
+COPY groq_speech/ /tmp/groq_speech/
+COPY setup.py /tmp/
+WORKDIR /tmp
+RUN pip install -e .
+
+# Stage 2: Build API server
+FROM python:3.11-slim as api-builder
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+# Install system dependencies for API
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy SDK from previous stage
+COPY --from=sdk-builder /opt/venv /opt/venv
+
+# Install API dependencies
+COPY api/requirements.txt /tmp/api-requirements.txt
+RUN pip install -r /tmp/api-requirements.txt
+
+# Stage 3: Production stage
 FROM python:3.11-slim as production
 
 # Set environment variables
@@ -46,7 +75,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
+COPY --from=api-builder /opt/venv /opt/venv
 
 # Create non-root user
 RUN groupadd -r groq && useradd -r -g groq groq
@@ -62,7 +91,6 @@ COPY deployment/docker/entrypoint.sh ./
 
 # Copy configuration files
 COPY .env.example .env
-COPY requirements.txt ./
 COPY setup.py ./
 
 # Set ownership

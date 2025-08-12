@@ -1,20 +1,18 @@
-# Core dependencies
+# Development and Installation Requirements
+# This file installs all components for development
+
+# Core SDK dependencies
 groq>=0.4.0
-pyaudio>=0.2.11
-numpy>=1.21.0
-soundfile>=0.10.3
-python-dotenv>=0.19.0
-
-# Web demo dependencies
-flask>=2.0.0
-flask-socketio>=5.0.0
-webbrowser
-
-# Taipy for optimized web demo
-taipy>=3.0.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+python-multipart>=0.0.6
+pydub>=0.25.1
 
 # Development dependencies
-pytest>=6.0.0
-pytest-cov>=2.10.0
-black>=21.0.0
-flake8>=3.8.0 
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0 

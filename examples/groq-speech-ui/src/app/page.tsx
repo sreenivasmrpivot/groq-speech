@@ -1,5 +1,6 @@
 'use client';
 
+import { ClientOnly } from '@/components/ClientOnly';
 import { DebugPanel } from '@/components/DebugPanel';
 import { SpeechRecognitionComponent } from '@/components/SpeechRecognition';
 import { GroqAPIClient } from '@/lib/groq-api';
@@ -283,9 +284,21 @@ export default function Home() {
             {/* Main Content */}
             {isConfigured && (
                 <main className="py-8">
-                    <SpeechRecognitionComponent
-                        useMockApi={useMockApi}
-                    />
+                    <ClientOnly fallback={
+                        <div className="max-w-6xl mx-auto p-6">
+                            <div className="bg-white rounded-lg shadow-md border p-6">
+                                <div className="animate-pulse">
+                                    <div className="h-8 bg-gray-200 rounded w-1/3 mb-4"></div>
+                                    <div className="h-4 bg-gray-200 rounded w-1/2 mb-6"></div>
+                                    <div className="h-12 bg-gray-200 rounded w-32 mx-auto"></div>
+                                </div>
+                            </div>
+                        </div>
+                    }>
+                        <SpeechRecognitionComponent
+                            useMockApi={useMockApi}
+                        />
+                    </ClientOnly>
                 </main>
             )}
 

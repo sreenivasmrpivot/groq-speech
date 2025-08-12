@@ -8,6 +8,12 @@ High-performance speech recognition using Groq's AI services with comprehensive 
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+- **Python 3.8+** and pip
+- **Node.js 18+** and npm (for web UI)
+- **Groq API Key** from [Groq Console](https://console.groq.com/)
+
 ### Installation
 
 ```bash
@@ -15,92 +21,74 @@ High-performance speech recognition using Groq's AI services with comprehensive 
 git clone <repository-url>
 cd groq-speech
 
-# Install dependencies
-pip install -r requirements.txt
-
 # Set up environment
-cp .env.example .env
-# Edit .env with your GROQ_API_KEY
+echo "GROQ_API_KEY=your_actual_groq_api_key_here" > .env
 ```
 
-### Basic Usage
+## 🎯 **Three Ways to Run**
 
-```python
-from groq_speech import SpeechConfig, SpeechRecognizer
-
-# Initialize
-speech_config = SpeechConfig()
-recognizer = SpeechRecognizer(speech_config=speech_config)
-
-# Single recognition
-result = recognizer.recognize_once_async()
-print(f"Recognized: {result.text}")
-
-# Continuous recognition
-def on_recognized(result):
-    print(f"'{result.text}' - {result.confidence:.2f}")
-
-recognizer.connect("recognized", on_recognized)
-recognizer.start_continuous_recognition()
-```
-
-### Examples
-
-The project includes two complete end-to-end examples:
-
-#### 1. Web UI Example
-A modern Next.js web application with real-time speech recognition:
+### **Option 1: One-Command Local Development (Recommended for Development)**
 
 ```bash
-# Start backend
-python -m api.server
-
-# Start frontend (in another terminal)
-cd examples/groq-speech-ui
-npm run dev
-# Open http://localhost:3000
+# Single command to start everything
+./run-dev.sh
 ```
 
-#### 2. CLI Example
-A command-line interface that directly uses the library:
+This script will:
+- ✅ Check and configure your environment
+- ✅ Install all Python and Node.js dependencies
+- ✅ Start the FastAPI backend server
+- ✅ Start the Next.js frontend
+- ✅ Open your browser to http://localhost:3000
+
+**What you get:**
+- 🌐 Frontend: http://localhost:3000
+- 🔧 Backend: http://localhost:8000
+- 📖 API Docs: http://localhost:8000/docs
+
+### **Option 2: Docker Development (Recommended for Consistent Environment)**
 
 ```bash
-# Set your API key
-export GROQ_API_KEY="your_groq_api_key_here"
-
-# Run CLI example
-cd examples
-python cli_speech_recognition.py --mode transcription --language en-US
+# Start both backend and frontend in Docker
+cd deployment/docker
+docker-compose -f docker-compose.full.yml up --build
 ```
 
-See `examples/README.md` for detailed usage instructions.
+**What you get:**
+- 🌐 Frontend: http://localhost:3000
+- 🔧 Backend: http://localhost:8000
+- 🐳 Everything runs in containers
+- 🔄 Hot reload for both frontend and backend
 
-## ✨ Key Features
-
-- **🎤 Real-time Speech Recognition**: Single and continuous recognition modes
-- **📊 Timing Metrics**: Detailed performance tracking for each pipeline stage
-- **🎯 High Accuracy**: 95%+ confidence with optimized VAD and audio processing
-- **📈 Performance Monitoring**: Real-time charts and visual indicators
-- **🌐 Web Interface**: Interactive demo with comprehensive metrics
-- **🧪 Comprehensive Testing**: Accuracy and performance test suites
-
-## 📊 Performance Highlights
-
-- **API Call Time**: ~295ms average (excellent performance)
-- **Total Response Time**: Under 1 second
-- **Accuracy**: 95% confidence
-- **Memory Usage**: Optimized buffer management
-- **Network Efficiency**: Audio compression and connection pooling
-
-## 🔧 Configuration
-
-Create a `.env` file:
+### **Option 3: Production Docker Deployment**
 
 ```bash
+# Production deployment with monitoring
+cd deployment/docker
+docker-compose up --build
+```
+
+**What you get:**
+- 🚀 Production-ready setup
+- 📊 Monitoring with Prometheus/Grafana
+- 🔒 Redis caching
+- 🛡️ Health checks and auto-restart
+
+## 🔧 **Configuration**
+
+### Environment Variables
+
+Create a `.env` file in the root directory:
+
+```env
 # Required
-GROQ_API_KEY=your_groq_api_key_here
+GROQ_API_KEY=your_actual_groq_api_key_here
 
-# Optional - Performance tuning
+# Optional - API Configuration
+GROQ_API_BASE_URL=https://api.groq.com/openai/v1
+GROQ_MODEL_ID=whisper-large-v3-turbo
+
+# Optional - Performance Tuning
 AUDIO_CHUNK_DURATION=1.0
 AUDIO_BUFFER_SIZE=16384
 AUDIO_SILENCE_THRESHOLD=0.005
@@ -108,57 +96,22 @@ DEFAULT_PHRASE_TIMEOUT=5
 DEFAULT_SILENCE_TIMEOUT=2
 ```
 
-## 🧪 Testing
-
-```bash
-# Run timing metrics test
-python test_timing_metrics.py
-
-# Run accuracy tests
-python tests/test_transcription_accuracy.py
-
-# Run all tests
-python -m pytest tests/
-```
-
-## 📚 Documentation
-
-- **[📖 Comprehensive Guide](docs/COMPREHENSIVE_GUIDE.md)** - Complete documentation covering all features
-- **[🏗️ Architecture Design](docs/architecture-design.md)** - System architecture and design patterns
-- **[🚀 Deployment Guide](docs/deployment-guide.md)** - Production deployment instructions
-- **[⚡ Performance Optimization](docs/performance-optimization.md)** - Performance tuning and optimization
-
-## 🎯 Recent Improvements
-
-### Version 2.0.0 - Major Enhancements
-
-- **⏱️ Timing Metrics**: Comprehensive performance tracking for microphone capture, API calls, and response processing
-- **🎯 Accuracy Improvements**: Enhanced VAD, better audio processing, and optimized configuration
-- **📊 Visual Analytics**: Real-time charts showing timing breakdown and performance trends
-- **🔧 Performance Optimization**: Faster processing pipeline with better memory management
-- **🧪 Enhanced Testing**: Comprehensive test suites for accuracy and performance
-
-### Key Fixes
-
-- ✅ Fixed wrong transcriptions (e.g., "I just" → "He's")
-- ✅ Reduced missed transcriptions between segments
-- ✅ Eliminated extra word repetitions
-- ✅ Improved speech segmentation and boundary detection
-
-## 🏗️ Architecture
+## 📁 **Project Structure**
 
 ```
-Microphone → AudioConfig → AudioProcessor → VAD → SpeechRecognizer → Groq API → Response Processing → Result
+groq-speech/
+├── groq_speech/           # Core SDK
+├── api/                   # FastAPI server
+├── examples/
+│   └── groq-speech-ui/   # Next.js frontend
+├── deployment/docker/     # Docker configurations
+├── requirements.txt       # Development dependencies
+├── requirements-dev.txt   # Development tools
+├── run-dev.sh            # One-command development script
+└── setup.py              # Package setup
 ```
 
-### Core Components
-
-- **SpeechRecognizer**: Main orchestration engine
-- **AudioProcessor**: Optimized audio processing with VAD
-- **TimingMetrics**: Comprehensive performance tracking
-- **Web Demo**: Interactive interface with real-time charts
-
-## 🚀 Quick Examples
+## 🎤 **Usage Examples**
 
 ### Basic Recognition
 ```python
@@ -172,24 +125,106 @@ if result.timing_metrics:
     print(f"Total time: {timing['total_time']*1000:.1f}ms")
 ```
 
-### Continuous Recognition with Timing
-```python
-def on_recognized(result):
-    if result.timing_metrics:
-        timing = result.timing_metrics.get_metrics()
-        print(f"'{result.text}' - {timing['total_time']*1000:.1f}ms")
+### Web UI Demo
+1. Run one of the three options above
+2. Open http://localhost:3000
+3. Click "Start Recording" to begin speech recognition
+4. Use "Mock Mode" for testing without API key
 
-recognizer.connect("recognized", on_recognized)
-recognizer.start_continuous_recognition()
-```
-
-### Web Demo with Charts
+### CLI Example
 ```bash
-python examples/web_demo_timing.py
-# Open http://localhost:5000 for interactive demo with timing metrics
+# Test CLI functionality
+python examples/cli_speech_recognition.py --help
+
+# List available models
+python examples/cli_speech_recognition.py --list-models
+
+# List available languages
+python examples/cli_speech_recognition.py --list-languages
 ```
 
-## 🤝 Contributing
+## 🧪 **Testing**
+
+```bash
+# Run all tests
+python -m pytest tests/
+
+# Run with coverage
+python -m pytest tests/ --cov=groq_speech --cov=api
+
+# Run timing metrics test
+python test_timing_metrics.py
+```
+
+## 🚀 **Development Workflow**
+
+### **For Backend Changes:**
+```bash
+# Option 1: Local development
+./run-dev.sh
+
+# Option 2: Docker development
+cd deployment/docker
+docker-compose -f docker-compose.full.yml up --build
+```
+
+### **For Frontend Changes:**
+```bash
+# Option 1: Local development
+./run-dev.sh
+
+# Option 2: Docker development (with volume mounts for hot reload)
+cd deployment/docker
+docker-compose -f docker-compose.full.yml up --build
+```
+
+### **For Production Deployment:**
+```bash
+cd deployment/docker
+docker-compose up --build
+```
+
+## 📊 **Performance Highlights**
+
+- **API Call Time**: ~295ms average
+- **Total Response Time**: Under 1 second
+- **Accuracy**: 95% confidence
+- **Memory Usage**: Optimized buffer management
+- **Network Efficiency**: Audio compression and connection pooling
+
+## 🔒 **Security Features**
+
+- API keys stored securely in backend
+- CORS configured for development and production
+- Environment-based configuration
+- No sensitive data exposed to frontend
+
+## 🆘 **Troubleshooting**
+
+### **Common Issues:**
+
+**Backend won't start:**
+- Check `.env` file has valid `GROQ_API_KEY`
+- Ensure port 8000 is free
+- Run `pip install -r requirements.txt`
+
+**Frontend can't connect:**
+- Ensure backend is running on port 8000
+- Check browser console for errors
+- Verify CORS configuration
+
+**Docker issues:**
+- Ensure Docker and Docker Compose are installed
+- Check container logs: `docker-compose logs`
+- Rebuild containers: `docker-compose up --build`
+
+## 📚 **Documentation**
+
+- **[📖 Comprehensive Guide](docs/COMPREHENSIVE_GUIDE.md)** - Complete technical documentation
+- **[🏗️ Architecture Design](docs/architecture-design.md)** - System architecture
+- **[🚀 Quick Start Guide](QUICKSTART.md)** - 5-minute setup guide
+
+## 🤝 **Contributing**
 
 1. Fork the repository
 2. Create a feature branch
@@ -199,16 +234,9 @@ python examples/web_demo_timing.py
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
-## 📄 License
+## 📄 **License**
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **📖 Documentation**: [Comprehensive Guide](docs/COMPREHENSIVE_GUIDE.md)
-- **🐛 Issues**: Report bugs on GitHub
-- **💡 Examples**: Check the `examples/` directory
-- **🧪 Tests**: Run tests to verify functionality
 
 ---
 
