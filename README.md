@@ -253,11 +253,27 @@ docker-compose up --build
 - Check container logs: `docker-compose logs`
 - Rebuild containers: `docker-compose up --build`
 
-## 📚 **Documentation**
+## 🏗️ **Architecture Overview**
 
-- **[📖 Comprehensive Guide](docs/COMPREHENSIVE_GUIDE.md)** - Complete technical documentation
-- **[🏗️ Architecture Design](docs/architecture-design.md)** - System architecture
-- **[🚀 Quick Start Guide](QUICKSTART.md)** - 5-minute setup guide
+The system follows a clean, layered architecture:
+
+```
+Frontend (Next.js) → API Server (FastAPI) → Core SDK (groq_speech) → Groq AI Services
+```
+
+- **Frontend**: Captures audio and displays results (no audio processing)
+- **API Server**: Routes requests and manages WebSocket connections
+- **Core SDK**: Handles all audio processing, chunking, and Groq API calls
+- **Groq Services**: Provides AI-powered speech recognition and translation
+
+### **Key Design Principles:**
+- **Separation of Concerns**: Each layer has a specific responsibility
+- **No Audio Processing in Frontend/API**: All audio processing is centralized in the SDK
+- **Configurable Chunking**: Environment-based configuration for optimal performance
+- **Real-time Processing**: WebSocket support for streaming recognition
+- **Language Detection**: Automatic source language detection with clear display
+
+**📖 For detailed technical architecture, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
 
 ## 🤝 **Contributing**
 

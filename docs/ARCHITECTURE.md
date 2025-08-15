@@ -1,12 +1,24 @@
-# Groq Speech SDK - Architecture Design
+# Groq Speech SDK - Architecture & Technical Guide
 
-## Overview
+## Table of Contents
 
-The Groq Speech SDK is a comprehensive Python library that provides real-time speech recognition capabilities using Groq's AI services. The architecture is designed to be modular, scalable, and production-ready.
+1. [System Architecture](#system-architecture)
+2. [Core Components](#core-components)
+3. [Data Flow](#data-flow)
+4. [Configuration System](#configuration-system)
+5. [Performance Optimization](#performance-optimization)
+6. [Security Features](#security-features)
+7. [Deployment Architecture](#deployment-architecture)
+8. [Monitoring & Observability](#monitoring--observability)
+9. [Future Enhancements](#future-enhancements)
+
+---
 
 ## System Architecture
 
-### Core Components
+The Groq Speech SDK follows a clean, layered architecture designed for scalability, maintainability, and performance.
+
+### High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -26,7 +38,7 @@ The Groq Speech SDK is a comprehensive Python library that provides real-time sp
 │                                   │                             │
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │                    Groq AI Services                        │ │
-│  │                                                             │ │
+│  │                                                             │
 │  │ • Whisper Large V3                                         │ │
 │  │ • Whisper Large V3 Turbo                                   │ │
 │  │ • Real-time Transcription                                   │ │
@@ -35,7 +47,17 @@ The Groq Speech SDK is a comprehensive Python library that provides real-time sp
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Component Details
+### Design Principles
+
+- **Separation of Concerns**: Each layer has a specific responsibility
+- **No Audio Processing in Frontend/API**: All audio processing is centralized in the SDK
+- **Configurable Chunking**: Environment-based configuration for optimal performance
+- **Real-time Processing**: WebSocket support for streaming recognition
+- **Language Detection**: Automatic source language detection with clear display
+
+---
+
+## Core Components
 
 ### 1. Core SDK (`groq_speech/`)
 
@@ -103,6 +125,8 @@ Real-world demonstration applications:
 - **Capabilities**: Single-shot and continuous recognition, performance metrics
 - **Technology**: React, TypeScript, Web Audio API
 
+---
+
 ## Data Flow
 
 ### Speech Recognition Pipeline
@@ -122,6 +146,8 @@ Audio Stream → Chunking (Configurable) → Buffer Accumulation → API Call �
 ```
 Audio Input → Language Detection → Groq Translation API → English Output → Result Display
 ```
+
+---
 
 ## Configuration System
 
@@ -157,24 +183,7 @@ chunking_config = Config.get_chunking_config()
 - `ENABLE_AUDIO_CACHING`: Audio caching (default: true)
 - `MAX_AUDIO_FILE_SIZE`: Maximum file size in MB (default: 25)
 
-## Error Handling
-
-### Exception Hierarchy
-
-The SDK provides a comprehensive exception hierarchy:
-
-- **`GroqSpeechException`**: Base exception class
-- **`ConfigurationError`**: Configuration-related errors
-- **`AudioProcessingError`**: Audio processing failures
-- **`APIError`**: Groq API communication errors
-- **`RecognitionError`**: Speech recognition failures
-
-### Error Recovery
-
-- Automatic retry mechanisms for transient failures
-- Graceful degradation for non-critical errors
-- Detailed error context for debugging
-- User-friendly error messages
+---
 
 ## Performance Optimization
 
@@ -199,6 +208,8 @@ The SDK provides a comprehensive exception hierarchy:
 - **Resource Pooling**: Reuses audio processing objects
 - **Memory Monitoring**: Tracks memory usage
 
+---
+
 ## Security Features
 
 ### API Key Management
@@ -214,6 +225,8 @@ The SDK provides a comprehensive exception hierarchy:
 - File size limits
 - Request rate limiting
 - Malicious input detection
+
+---
 
 ## Deployment Architecture
 
@@ -243,7 +256,9 @@ The SDK provides a comprehensive exception hierarchy:
 └─────────────────┘
 ```
 
-## Monitoring and Observability
+---
+
+## Monitoring & Observability
 
 ### Health Checks
 
@@ -265,6 +280,8 @@ The SDK provides a comprehensive exception hierarchy:
 - **Context Information**: Request IDs and user context
 - **Performance Logging**: Timing and resource usage
 
+---
+
 ## Future Enhancements
 
 ### Planned Features
@@ -285,4 +302,4 @@ The SDK provides a comprehensive exception hierarchy:
 
 ---
 
-*This architecture design document provides a comprehensive overview of the Groq Speech SDK's system design, components, and implementation details.* 
+*This architecture document provides a comprehensive overview of the Groq Speech SDK's system design, components, and implementation details.*
