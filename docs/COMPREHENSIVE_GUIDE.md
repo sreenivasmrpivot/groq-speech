@@ -26,8 +26,10 @@ The Groq Speech SDK provides high-performance speech recognition capabilities us
 - **High Accuracy**: Optimized transcription with 95%+ confidence
 - **Performance Monitoring**: Detailed timing metrics for each pipeline stage
 - **Web Demo**: Interactive web interface with visual charts
+- **CLI Interface**: Command-line tool with single/continuous modes
 - **Comprehensive Testing**: Accuracy and performance test suites
 - **Easy Integration**: Simple API for quick implementation
+- **Configurable Chunking**: Prevent word loss with customizable buffer sizes
 
 ---
 
@@ -36,7 +38,7 @@ The Groq Speech SDK provides high-performance speech recognition capabilities us
 ```
 groq-speech/
 ├── groq_speech/                 # Core SDK package
-│   ├── __init__.py
+│   ├── __init__.py              # Main SDK interface
 │   ├── speech_recognizer.py     # Main recognition engine
 │   ├── speech_config.py         # Configuration management
 │   ├── audio_config.py          # Audio input/output handling
@@ -50,7 +52,7 @@ groq-speech/
 │   ├── models/                 # Request/response models
 │   └── requirements.txt        # API dependencies
 ├── examples/                    # Usage examples
-│   ├── cli_speech_recognition.py
+│   ├── cli_speech_recognition.py  # CLI tool with single/continuous modes
 │   ├── groq-speech-ui/         # Next.js web interface
 │   └── requirements.txt        # Example dependencies
 ├── tests/                      # Test suites
@@ -98,362 +100,128 @@ Create a `.env` file with:
 
 ```bash
 # Required
-GROQ_API_KEY=your_groq_api_key_here
+GROQ_API_KEY=your_actual_groq_api_key_here
 
 # Optional - API Configuration
 GROQ_API_BASE_URL=https://api.groq.com/openai/v1
-GROQ_MODEL_ID=whisper-large-v3-turbo
+GROQ_MODEL_ID=whisper-large-v3
+GROQ_RESPONSE_FORMAT=verbose_json
+GROQ_TEMPERATURE=0.0
 
-# Optional - Performance Tuning
+# Optional - Chunking Configuration (New!)
+CONTINUOUS_BUFFER_DURATION=12.0      # Buffer duration in seconds
+CONTINUOUS_OVERLAP_DURATION=3.0      # Overlap duration in seconds
+CONTINUOUS_CHUNK_SIZE=1024           # Audio chunk size in samples
+
+# Optional - Audio Processing
 AUDIO_CHUNK_DURATION=1.0
 AUDIO_BUFFER_SIZE=16384
 AUDIO_SILENCE_THRESHOLD=0.005
-DEFAULT_PHRASE_TIMEOUT=5
-DEFAULT_SILENCE_TIMEOUT=2
+AUDIO_VAD_ENABLED=true
+
+# Optional - Performance Settings
+ENABLE_AUDIO_COMPRESSION=true
+ENABLE_AUDIO_CACHING=true
+MAX_AUDIO_FILE_SIZE=25
 ```
 
 ---
 
 ## Architecture Design
 
-The Groq Speech SDK follows a modular architecture with clear separation of concerns:
-
 ### Core Components
 
-- **SpeechRecognizer**: Main orchestration engine
-- **AudioProcessor**: Optimized audio processing with VAD
-- **SpeechConfig**: Configuration management
-- **AudioConfig**: Audio input/output handling
-
-### Data Flow
-
 ```
-Microphone → AudioConfig → AudioProcessor → VAD → SpeechRecognizer → Groq API → Response Processing → Result
-```
-
-### Dependencies
-
-```
-groq_speech/ (Core SDK)
-    ↓
-examples/cli_speech_recognition.py (consumes groq_speech)
-    ↓
-api/server.py (consumes groq_speech)
-    ↓
-examples/groq-speech-ui (consumes api via HTTP)
-```
-
----
-
-## API Integration
-
-### FastAPI Server
-
-The API server provides REST and WebSocket endpoints:
-
-```bash
-# Start API server
-python -m api.server
-
-# Available endpoints
-GET  /health                    # Health check
-POST /api/v1/recognize         # Speech recognition
-POST /api/v1/translate         # Speech translation
-WS   /ws/recognize             # WebSocket recognition
-GET  /api/v1/models            # Available models
-GET  /api/v1/languages         # Supported languages
+┌─────────────────────────────────────────────────────────────────┐
+│                    Groq Speech SDK Architecture                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐ │
+│  │   Core SDK      │    │   API Server    │   │   Demos     │ │
+│  │                 │    │                 │   │             │ │
+│  │ • SpeechConfig  │    │ • FastAPI       │   │ • CLI Tool  │ │
+│  │ • AudioConfig   │    │ • WebSocket     │   │ • Web UI    │ │
+│  │ • Recognizer    │    │ • REST API      │   │ • Examples  │ │
+│  │ • Results       │    │ • gRPC (future) │   │             │ │
+│  └─────────────────┘    └─────────────────┘   └─────────────┘ │
+│           │                       │                       │     │
+│           └───────────────────────┼───────────────────────┘     │
+│                                   │                             │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │                    Groq AI Services                        │ │
+│  │                                                             │ │
+│  │ • Whisper Large V3                                         │ │
+│  │ • Whisper Large V3 Turbo                                   │ │
+│  │ • Real-time Transcription                                   │ │
+│  │ • Multi-language Support                                    │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### WebSocket Usage
-
-```python
-import websockets
-import json
-
-async def recognize_speech():
-    uri = "ws://localhost:8000/ws/recognize"
-    async with websockets.connect(uri) as websocket:
-        await websocket.send(json.dumps({
-            "type": "start_recognition",
-            "data": {"language": "en-US"}
-        }))
-        
-        async for message in websocket:
-            data = json.loads(message)
-            if data["type"] == "recognition_result":
-                print(f"Recognized: {data['data']['text']}")
-```
-
----
-
-## Transcription Accuracy Improvements
-
-### Version 2.0.0 Enhancements
-
-- **Enhanced VAD**: Improved voice activity detection
-- **Better Audio Processing**: Gentler noise reduction
-- **Optimized Configuration**: Better default settings
-- **Improved Segmentation**: Better speech boundary detection
-
-### Key Fixes
-
-- ✅ Fixed wrong transcriptions (e.g., "I just" → "He's")
-- ✅ Reduced missed transcriptions between segments
-- ✅ Eliminated extra word repetitions
-- ✅ Improved speech segmentation and boundary detection
-
----
-
-## Timing Metrics & Performance
-
-### Performance Tracking
-
-The SDK provides comprehensive timing metrics for each pipeline stage:
-
-```python
-from groq_speech import SpeechConfig, SpeechRecognizer
+## Component Details
 
-recognizer = SpeechRecognizer(SpeechConfig())
-result = recognizer.recognize_once_async()
-
-if result.timing_metrics:
-    timing = result.timing_metrics.get_metrics()
-    print(f"Total time: {timing['total_time']*1000:.1f}ms")
-    print(f"API call: {timing['api_call']*1000:.1f}ms")
-    print(f"Processing: {timing['response_processing']*1000:.1f}ms")
-```
-
-### Performance Highlights
+### 1. Core SDK (`groq_speech/`)
 
-- **API Call Time**: ~295ms average
-- **Total Response Time**: Under 1 second
-- **Accuracy**: 95% confidence
-- **Memory Usage**: Optimized buffer management
-- **Network Efficiency**: Audio compression and connection pooling
-
----
+The core SDK provides the fundamental speech recognition functionality:
 
-## Deployment Guide
+#### Key Classes
 
-### Three Ways to Run
+- **`SpeechConfig`**: Configuration management for speech recognition
+- **`AudioConfig`**: Audio input/output configuration
+- **`SpeechRecognizer`**: Main recognition engine
+- **`SpeechRecognitionResult`**: Recognition results with metadata
+- **`Config`**: Environment-based configuration management
 
-#### Option 1: One-Command Local Development (Easiest)
-```bash
-# Single command that does everything
-./run-dev.sh
-```
-**What happens:**
-- ✅ Installs all dependencies
-- ✅ Starts backend server on port 8000
-- ✅ Starts frontend on port 3000
-- ✅ Opens browser automatically
-- ✅ Handles cleanup with Ctrl+C
+#### Features
 
-#### Option 2: Docker Development (Most Reliable)
-```bash
-cd deployment/docker
-docker-compose -f docker-compose.full.yml up --build
-```
-**What happens:**
-- ✅ Builds both backend and frontend containers
-- ✅ Backend runs on port 8000
-- ✅ Frontend runs on port 3000
-- ✅ Hot reload for development
-- ✅ Redis caching included
+- Real-time speech recognition
+- File-based recognition
+- Multi-language support
+- Confidence scoring
+- Language detection
+- Word-level timestamps
+- Semantic segmentation
+- Configurable chunking with overlap
 
-#### Option 3: Production Docker Deployment
-```bash
-cd deployment/docker
-docker-compose up --build
-```
-**What happens:**
-- ✅ Production-ready with monitoring
-- ✅ Redis caching
-- ✅ Health checks
-- ✅ Auto-restart
+### 2. API Server (`api/`)
 
-### Docker Architecture
-
-The Docker setup uses multi-stage builds to handle dependencies:
+A production-ready FastAPI server that exposes the SDK functionality:
 
-1. **SDK Builder**: Installs core SDK dependencies
-2. **API Builder**: Installs API dependencies + SDK
-3. **Production**: Runtime image with all components
+#### Endpoints
 
-### Environment Variables
-
-```bash
-# Required
-GROQ_API_KEY=your_actual_groq_api_key_here
-
-# Optional
-GROQ_API_BASE_URL=https://api.groq.com/openai/v1
-GROQ_MODEL_ID=whisper-large-v3-turbo
-LOG_LEVEL=INFO
-ENVIRONMENT=production
-```
-
----
-
-## Performance Optimization
+- **REST API**:
+  - `POST /api/v1/recognize` - Single-shot recognition
+  - `POST /api/v1/recognize-file` - File-based recognition
+  - `GET /api/v1/models` - Available models
+  - `GET /api/v1/languages` - Supported languages
+  - `GET /health` - Health check
 
-### Audio Processing Optimization
+- **WebSocket API**:
+  - `ws://localhost:8000/ws/recognize` - Real-time recognition
 
-1. **VAD Settings**: Adjust silence thresholds for your environment
-2. **Buffer Sizes**: Optimize for your audio hardware
-3. **Chunk Duration**: Balance latency vs. accuracy
+#### Features
 
-### Configuration Tuning
+- Async/await support
+- WebSocket real-time streaming
+- CORS middleware
+- Request validation
+- Error handling
+- Health monitoring
 
-```python
-from groq_speech import SpeechConfig
+### 3. Demo Applications (`examples/`)
 
-config = SpeechConfig()
-
-# Performance tuning
-config.set_property("AUDIO_CHUNK_DURATION", 0.5)      # Faster processing
-config.set_property("AUDIO_BUFFER_SIZE", 8192)         # Smaller buffers
-config.set_property("AUDIO_SILENCE_THRESHOLD", 0.01)   # More sensitive VAD
-```
-
-### Monitoring and Metrics
-
-- **Real-time Charts**: Web UI shows performance trends
-- **Health Checks**: Docker health checks monitor services
-- **Logging**: Structured logging for debugging
-- **Metrics Export**: Performance data for analysis
-
-### Best Practices
-
-1. **Use good microphone**: Quality audio input improves accuracy
-2. **Check internet**: Stable connection reduces API call time
-3. **Monitor performance**: Watch timing metrics for issues
-4. **Optimize settings**: Adjust VAD and audio settings for your environment
-5. **Set thresholds**: Define acceptable performance limits
-
----
+Real-world demonstration applications:
 
-## Contributing
+#### CLI Speech Recognition (`cli_speech_recognition.py`)
 
-### Development Setup
+- **Features**: Single and continuous recognition modes, transcription and translation
+- **Modes**: Single-shot (one-time) and continuous (real-time streaming)
+- **Operations**: Transcription and translation to English
+- **Technology**: Configurable chunking, environment-based configuration
 
-```bash
-# Install development dependencies
-pip install -r requirements-dev.txt
+#### Web UI Demo (`groq-speech-ui/`)
 
-# Install package in editable mode
-pip install -e .
-
-# Run tests
-python -m pytest tests/
-
-# Run linting
-black groq_speech/ api/ examples/
-flake8 groq_speech/ api/ examples/
-```
-
-### Testing
-
-```python
-# Example test structure
-def test_continuous_recognition():
-    # Setup
-    recognizer = SpeechRecognizer(SpeechConfig())
-    transcripts = []
-    
-    def on_recognized(result):
-        if result.reason == ResultReason.RecognizedSpeech:
-            transcripts.append(result)
-    
-    # Test
-    recognizer.connect("recognized", on_recognized)
-    recognizer.start_continuous_recognition()
-    time.sleep(5)
-    recognizer.stop_continuous_recognition()
-    
-    # Assertions
-    assert len(transcripts) > 0
-```
-
-### Pull Request Process
-
-1. **Create feature branch**: `git checkout -b feature/new-feature`
-2. **Make changes**: Implement your feature
-3. **Add tests**: Write tests for your changes
-4. **Update documentation**: Update relevant docs
-5. **Run tests**: Ensure all tests pass
-6. **Submit PR**: Create pull request with description
-
-### Code Review Checklist
-
-- [ ] Code follows style guidelines
-- [ ] Tests are included and passing
-- [ ] Documentation is updated
-- [ ] Performance impact is considered
-- [ ] Security implications are reviewed
-- [ ] Backward compatibility is maintained
-
----
-
-## Changelog
-
-### Version 2.0.0 (Current)
-
-#### New Features
-- **Timing Metrics**: Comprehensive performance tracking
-- **Enhanced VAD**: Improved voice activity detection
-- **Web Demo with Charts**: Real-time performance visualization
-- **Accuracy Improvements**: Better transcription quality
-- **Performance Optimization**: Faster processing pipeline
-
-#### Improvements
-- **Audio Processing**: Gentler noise reduction and better normalization
-- **Microphone Capture**: Longer, higher-quality audio capture
-- **Configuration**: Better default settings
-- **Error Handling**: More robust error management
-- **Documentation**: Comprehensive guides and examples
-
-#### Bug Fixes
-- **Transcription Accuracy**: Fixed wrong transcriptions and missed segments
-- **VAD Issues**: Resolved premature speech cutoff
-- **Audio Quality**: Improved audio preprocessing
-- **Performance**: Reduced processing time and memory usage
-
-### Version 1.0.0
-
-#### Initial Release
-- **Basic Speech Recognition**: Single and continuous recognition
-- **Web Demo**: Simple web interface
-- **Audio Processing**: Basic audio handling
-- **Configuration**: Environment-based configuration
-- **Testing**: Basic test suite
-
----
-
-## Support & Resources
-
-### Getting Help
-
-- **Documentation**: This comprehensive guide
-- **Examples**: Check the `examples/` directory
-- **Tests**: Run tests to verify functionality
-- **Issues**: Report bugs on GitHub
-
-### Performance Tips
-
-1. **Use good microphone**: Quality audio input improves accuracy
-2. **Check internet**: Stable connection reduces API call time
-3. **Monitor performance**: Watch timing metrics for issues
-4. **Optimize settings**: Adjust VAD and audio settings for your environment
-
-### Best Practices
-
-1. **Always check timing metrics**: Verify they exist before using
-2. **Handle exceptions**: Ensure timing calls are in try/finally blocks
-3. **Monitor trends**: Track performance over time
-4. **Set thresholds**: Define acceptable performance limits
-5. **Test thoroughly**: Run comprehensive tests before deployment
-
----
-
-*This comprehensive guide covers all aspects of the Groq Speech SDK. For specific questions or issues, please refer to the relevant sections above or create an issue on GitHub.* 
+- **Features**: Next.js frontend with real-time speech recognition
+- **UI**: Modern, responsive interface with Tailwind CSS
+- **Capabilities**: Single-shot and continuous recognition, performance metrics
+- **Technology**: React, TypeScript, Web Audio API 

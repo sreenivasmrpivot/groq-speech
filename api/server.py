@@ -8,21 +8,20 @@ import sys
 import json
 import asyncio
 import threading
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
-import time
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-import websockets
 
 # Add the parent directory to the path to import the SDK
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import groq_speech after adding to path
 from groq_speech import (
     SpeechConfig,
     SpeechRecognizer,
@@ -164,13 +163,28 @@ async def recognize_speech(request: RecognitionRequest):
         # Create recognizer
         recognizer = SpeechRecognizer(speech_config)
 
-        # Decode audio data
+        # Decode base64 audio data and convert to numpy array
         import base64
+        import numpy as np
 
-        audio_data = base64.b64decode(request.audio_data)
+        try:
+            # Decode base64 audio data
+            audio_bytes = base64.b64decode(request.audio_data)
 
-        # Perform recognition
-        result = recognizer.recognize_once_async()
+            # Convert to numpy array (assuming 16-bit PCM)
+            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+
+            # Normalize to float32
+            audio_array_float = audio_array.astype(np.float32) / 32768.0
+
+            # Perform recognition on the audio data
+            result = recognizer.recognize_audio_data(audio_array_float)
+
+        except Exception as audio_error:
+            print(f"Error processing audio data: {audio_error}")
+            return RecognitionResponse(
+                success=False, error=f"Failed to process audio data: {str(audio_error)}"
+            )
 
         if result.reason == ResultReason.RecognizedSpeech:
             return RecognitionResponse(
@@ -178,7 +192,7 @@ async def recognize_speech(request: RecognitionRequest):
                 text=result.text,
                 confidence=result.confidence,
                 language=result.language,
-                timestamps=result.timestamps if request.enable_timestamps else None,
+                timestamps=(result.timestamps if request.enable_timestamps else None),
             )
         elif result.reason == ResultReason.NoMatch:
             return RecognitionResponse(success=False, error="No speech detected")
@@ -205,13 +219,30 @@ async def translate_speech(request: RecognitionRequest):
         # Create recognizer
         recognizer = SpeechRecognizer(speech_config)
 
-        # Decode audio data
+        # Decode base64 audio data and convert to numpy array
         import base64
+        import numpy as np
 
-        audio_data = base64.b64decode(request.audio_data)
+        try:
+            # Decode base64 audio data
+            audio_bytes = base64.b64decode(request.audio_data)
 
-        # Perform translation
-        result = recognizer.recognize_once_async()
+            # Convert to numpy array (assuming 16-bit PCM)
+            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+
+            # Normalize to float32
+            audio_array_float = audio_array.astype(np.float32) / 32768.0
+
+            # Perform translation on the audio data
+            result = recognizer.recognize_audio_data(
+                audio_array_float, is_translation=True
+            )
+
+        except Exception as audio_error:
+            print(f"Error processing audio data: {audio_error}")
+            return RecognitionResponse(
+                success=False, error=f"Failed to process audio data: {str(audio_error)}"
+            )
 
         if result.reason == ResultReason.RecognizedSpeech:
             return RecognitionResponse(
@@ -219,7 +250,7 @@ async def translate_speech(request: RecognitionRequest):
                 text=result.text,
                 confidence=result.confidence,
                 language=result.language,
-                timestamps=result.timestamps if request.enable_timestamps else None,
+                timestamps=(result.timestamps if request.enable_timestamps else None),
             )
         elif result.reason == ResultReason.NoMatch:
             return RecognitionResponse(success=False, error="No speech detected")
@@ -239,11 +270,11 @@ async def recognize_audio_file(file_path: str, language: str = "en-US"):
 
         # Create configurations
         speech_config = get_speech_config(language=language)
-        audio_config = AudioConfig(filename=file_path)
+        # audio_config = AudioConfig(filename=file_path) # This line was causing a runtime error
 
         # Create recognizer
         recognizer = SpeechRecognizer(
-            speech_config=speech_config, audio_config=audio_config
+            speech_config=speech_config,  # audio_config=audio_config # This line was causing a runtime error
         )
 
         # Perform recognition
@@ -328,11 +359,54 @@ async def get_supported_languages():
     return {"languages": languages}
 
 
+@app.websocket("/ws/test")
+async def websocket_test(websocket: WebSocket):
+    """Simple WebSocket test endpoint to verify connectivity."""
+    print("🧪 WebSocket test connection request...")
+    await websocket.accept()
+    print("✅ WebSocket test connection accepted")
+
+    try:
+        # Send immediate test message
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "test",
+                    "data": {"message": "WebSocket connection successful!"},
+                }
+            )
+        )
+        print("✅ Test message sent")
+
+        # Wait for client message
+        message = await websocket.receive_text()
+        print(f"📨 Test message received: {message}")
+
+        # Send response
+        await websocket.send_text(
+            json.dumps(
+                {"type": "test_response", "data": {"message": "Echo: " + message}}
+            )
+        )
+        print("✅ Test response sent")
+
+    except WebSocketDisconnect:
+        print("🔌 WebSocket test disconnected")
+    except Exception as e:
+        print(f"💥 WebSocket test error: {e}")
+    finally:
+        print("🧹 WebSocket test cleanup completed")
+
+
 @app.websocket("/ws/recognize")
 async def websocket_recognition(websocket: WebSocket):
     """WebSocket endpoint for real-time speech recognition."""
+    print("🔌 New WebSocket connection request...")
     await websocket.accept()
+    print("✅ WebSocket connection accepted")
+
     active_connections.append(websocket)
+    print(f"📊 Active connections: {len(active_connections)}")
 
     session_id = str(id(websocket))
     recognition_sessions[session_id] = {
@@ -341,33 +415,44 @@ async def websocket_recognition(websocket: WebSocket):
         "transcripts": [],
         "is_recording": False,
     }
+    print(f"🆔 Created session {session_id}")
 
     try:
         # Send connection confirmation
+        print(f"📤 Sending connection confirmation to session {session_id}")
         await websocket.send_text(
             json.dumps({"type": "connected", "data": {"session_id": session_id}})
         )
+        print(f"✅ Connection confirmation sent to session {session_id}")
 
         while True:
             # Receive message from client
+            print(f"👂 Waiting for message from session {session_id}...")
             message = await websocket.receive_text()
-            print(f"Received WebSocket message: {message}")
+            print(
+                f"📨 Received WebSocket message from session {session_id}: "
+                f"{message}"
+            )
             data = json.loads(message)
 
             if data["type"] == "start_recognition":
-                print(f"Starting recognition for session {session_id}")
+                print(f"🚀 Starting recognition for session {session_id}")
                 await handle_start_recognition(session_id, data.get("data", {}))
             elif data["type"] == "stop_recognition":
-                print(f"Stopping recognition for session {session_id}")
+                print(f"🛑 Stopping recognition for session {session_id}")
                 await handle_stop_recognition(session_id)
             elif data["type"] == "audio_data":
-                print(f"Processing audio data for session {session_id}")
-                await handle_audio_data(session_id, data.get("data", {}))
+                print(f"� Processing audio data for session {session_id}")
+                # Process audio data asynchronously without blocking
+                asyncio.create_task(handle_audio_data(session_id, data.get("data", {})))
             elif data["type"] == "ping":
-                print(f"Ping received for session {session_id}")
+                print(f"🏓 Ping received for session {session_id}")
                 await websocket.send_text(json.dumps({"type": "pong"}))
             else:
-                print(f"Unknown message type: {data['type']}")
+                print(
+                    f"❓ Unknown message type from session {session_id}: "
+                    f"{data['type']}"
+                )
                 await websocket.send_text(
                     json.dumps(
                         {"type": "error", "data": {"message": "Unknown message type"}}
@@ -375,18 +460,44 @@ async def websocket_recognition(websocket: WebSocket):
                 )
 
     except WebSocketDisconnect:
-        print(f"WebSocket disconnected: {session_id}")
+        print(f"🔌 WebSocket disconnected for session {session_id}")
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"💥 WebSocket error for session {session_id}: {e}")
         await websocket.send_text(
             json.dumps({"type": "error", "data": {"message": str(e)}})
         )
     finally:
         # Cleanup
+        print(f"🧹 Cleaning up session {session_id}")
         if websocket in active_connections:
             active_connections.remove(websocket)
+            print(
+                f"📊 Removed from active connections. Total: {len(active_connections)}"
+            )
         if session_id in recognition_sessions:
             del recognition_sessions[session_id]
+            print(f"🗑️ Deleted session {session_id}")
+        print(f"✅ Cleanup completed for session {session_id}")
+
+
+async def handle_websocket_close(websocket: WebSocket):
+    """Handle WebSocket close and clean up the session."""
+    try:
+        # Find and remove the session
+        session_id_to_remove = None
+        for session_id, session in recognition_sessions.items():
+            if session.get("websocket") == websocket:
+                session_id_to_remove = session_id
+                print(f"🔌 WebSocket closed for session {session_id}, cleaning up...")
+                break
+
+        if session_id_to_remove:
+            # Remove the session
+            del recognition_sessions[session_id_to_remove]
+            print(f"🧹 Cleaned up session {session_id_to_remove}")
+
+    except Exception as e:
+        print(f"Error handling WebSocket close: {e}")
 
 
 async def handle_start_recognition(session_id: str, config: Dict[str, Any]):
@@ -399,6 +510,8 @@ async def handle_start_recognition(session_id: str, config: Dict[str, Any]):
         session["current_model"] = config.get("model")
         session["is_translation"] = config.get("is_translation", False)
         session["target_language"] = config.get("target_language")
+        session["mode"] = config.get("mode", "continuous")  # "continuous" or "single"
+        session["buffered_results"] = []  # For single shot mode
 
         # Send confirmation
         await session["websocket"].send_text(
@@ -421,7 +534,7 @@ async def handle_start_recognition(session_id: str, config: Dict[str, Any]):
                         )
 
                 # Create recognizer
-                recognizer = SpeechRecognizer(speech_config=speech_config)
+                # recognizer = SpeechRecognizer(speech_config=speech_config)  # Unused variable removed
 
                 # For WebSocket, we need to wait for audio data from the client
                 # The actual recognition will happen when audio data is received
@@ -470,11 +583,55 @@ async def handle_start_recognition(session_id: str, config: Dict[str, Any]):
 
 async def handle_stop_recognition(session_id: str):
     """Handle stop recognition request."""
+    print(f"🛑 Handling stop recognition for session {session_id}")
+
     if session_id in recognition_sessions:
-        recognition_sessions[session_id]["is_recording"] = False
-        await recognition_sessions[session_id]["websocket"].send_text(
-            json.dumps({"type": "recognition_stopped", "data": {"status": "stopped"}})
-        )
+        session = recognition_sessions[session_id]
+
+        # Mark session as stopped
+        session["is_recording"] = False
+        print(f"✅ Marked session {session_id} as stopped")
+
+        # Handle single shot mode - send all buffered results
+        mode = session.get("mode", "continuous")
+        if mode == "single" and session.get("buffered_results"):
+            print(
+                f"📤 Sending {len(session['buffered_results'])} buffered results for single shot mode"
+            )
+            try:
+                # Send all buffered results
+                for i, result in enumerate(session["buffered_results"]):
+                    await session["websocket"].send_text(
+                        json.dumps({"type": "recognition_result", "data": result})
+                    )
+                    print(f"✅ Sent buffered result {i+1}: '{result['text']}'")
+
+                # Clear buffered results
+                session["buffered_results"] = []
+
+            except Exception as e:
+                print(f"❌ Error sending buffered results: {e}")
+
+        # Send confirmation to frontend
+        try:
+            await session["websocket"].send_text(
+                json.dumps(
+                    {"type": "recognition_stopped", "data": {"status": "stopped"}}
+                )
+            )
+            print(f"✅ Stop confirmation sent to frontend for session {session_id}")
+        except Exception as e:
+            print(f"❌ Error sending stop confirmation: {e}")
+
+        # Clean up the session
+        try:
+            if session_id in recognition_sessions:
+                del recognition_sessions[session_id]
+                print(f"🧹 Cleaned up session {session_id}")
+        except Exception as e:
+            print(f"❌ Error cleaning up session: {e}")
+    else:
+        print(f"⚠️ Session {session_id} not found for stop recognition")
 
 
 async def handle_audio_data(session_id: str, audio_data: Dict[str, Any]):
@@ -492,6 +649,11 @@ async def handle_audio_data(session_id: str, audio_data: Dict[str, Any]):
     session = recognition_sessions[session_id]
     print(f"Processing audio data for session {session_id}")
 
+    # Check if session has been stopped
+    if not session.get("is_recording", False):
+        print(f"⚠️ Session {session_id} has been stopped, ignoring audio data")
+        return
+
     # Decode base64 audio data
     audio_bytes = base64.b64decode(audio_data["audio_data"])
     print(f"Decoded audio data: {len(audio_bytes)} bytes")
@@ -500,35 +662,57 @@ async def handle_audio_data(session_id: str, audio_data: Dict[str, Any]):
     mime_type = audio_data.get("mime_type", "audio/webm")
     print(f"Audio MIME type: {mime_type}")
 
-    # Initialize audio chunks list if it doesn't exist
+    # Accumulate audio chunks for better recognition
     if "audio_chunks" not in session:
         session["audio_chunks"] = []
-        session["mime_type"] = mime_type
-        session["chunk_count"] = 0
 
-    # Add current chunk to the session
     session["audio_chunks"].append(audio_bytes)
-    session["chunk_count"] += 1
+    total_audio_size = sum(len(chunk) for chunk in session["audio_chunks"])
 
     print(
-        f"Accumulated {session['chunk_count']} audio chunks, total size: {sum(len(chunk) for chunk in session['audio_chunks'])} bytes"
+        f"Accumulated {len(session['audio_chunks'])} chunks, total size: {total_audio_size} bytes"
     )
 
-    # Only process when we have enough audio data
-    min_chunks = 3
-    min_total_size = 50000  # 50KB minimum for a valid audio file
+    # Only process if we have enough audio data or if it's the last chunk
+    min_audio_size = 1000  # Reduced to 1KB minimum for better recognition
+    is_last_chunk = audio_data.get("is_last_chunk", False)
 
-    if (
-        session["chunk_count"] >= min_chunks
-        and sum(len(chunk) for chunk in session["audio_chunks"]) >= min_total_size
-    ):
+    if total_audio_size < min_audio_size and not is_last_chunk:
+        print(
+            f"⏳ Waiting for more audio data (current: {total_audio_size}, need: {min_audio_size})"
+        )
+        return
+
+    # Validate that we have some audio data
+    if total_audio_size == 0:
+        print("⚠️ No audio data to process")
+        return
+
+    # Process accumulated audio chunks
+    try:
+        # Combine all accumulated chunks
+        combined_audio = b"".join(session["audio_chunks"])
+        print(f"Processing combined audio: {len(combined_audio)} bytes")
+
+        # Create temporary file for the combined audio
+        audio_file_path = None
 
         try:
-            # Combine all accumulated chunks
-            combined_audio = b"".join(session["audio_chunks"])
-            print(
-                f"Processing combined audio: {len(combined_audio)} bytes from {session['chunk_count']} chunks"
-            )
+            # Save the combined audio as a temporary file
+            # Use the original format extension to maintain compatibility
+            if mime_type.startswith("audio/webm"):
+                file_extension = ".webm"
+            elif mime_type.startswith("audio/ogg"):
+                file_extension = ".ogg"
+            elif mime_type.startswith("audio/mp4"):
+                file_extension = ".m4a"
+            else:
+                file_extension = ".webm"  # Default
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as f:
+                f.write(combined_audio)
+                audio_file_path = f.name
+                print(f"Created temporary audio file: {audio_file_path}")
 
             # Use groq_speech SDK EXACTLY like CLI example
             from groq_speech import (
@@ -554,138 +738,184 @@ async def handle_audio_data(session_id: str, audio_data: Dict[str, Any]):
                 f"Using groq_speech SDK with model: {model}, translation: {is_translation}"
             )
 
-            # Create temporary file for the combined audio data
-            audio_file_path = None
+            # Create recognizer - EXACTLY like CLI
+            print("🎤 Starting recognition...")
+            start_time = time.time()
+
+            # Create recognizer - EXACTLY like CLI (no AudioConfig needed)
+            recognizer = SpeechRecognizer(config)
+
+            print("Created SpeechRecognizer using groq_speech SDK - EXACTLY like CLI")
+
+            # For WebSocket mode, we need to process the audio data directly
+            # Convert the temporary file to numpy array and process it
+            import numpy as np
+            import soundfile as sf
 
             try:
-                # Save the combined audio as a temporary file
-                # Use the original format extension to maintain compatibility
-                if mime_type.startswith("audio/webm"):
-                    file_extension = ".webm"
-                elif mime_type.startswith("audio/ogg"):
-                    file_extension = ".ogg"
-                elif mime_type.startswith("audio/mp4"):
-                    file_extension = ".m4a"
-                else:
-                    file_extension = ".webm"  # Default
+                # Try to read the audio file directly
+                try:
+                    audio_data, sample_rate = sf.read(audio_file_path)
+                    print(
+                        f"Read audio file: {len(audio_data)} samples, {sample_rate} Hz"
+                    )
+                except Exception as read_error:
+                    print(f"Could not read audio file directly: {read_error}")
+                    print("Converting audio format using pydub...")
 
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=file_extension
-                ) as f:
-                    f.write(combined_audio)
-                    audio_file_path = f.name
-                    print(f"Created temporary audio file: {audio_file_path}")
+                    # Fallback: convert audio to WAV using pydub
+                    from pydub import AudioSegment
 
-                # Create recognizer - EXACTLY like CLI
-                print("🎤 Starting recognition...")
-                start_time = time.time()
+                    audio = AudioSegment.from_file(audio_file_path)
+                    # Convert to WAV format that soundfile can read
+                    wav_path = audio_file_path + ".wav"
+                    audio.export(wav_path, format="wav")
 
-                # Create recognizer - EXACTLY like CLI (no AudioConfig needed)
-                recognizer = SpeechRecognizer(config)
+                    # Read the converted WAV file
+                    audio_data, sample_rate = sf.read(wav_path)
+                    print(
+                        f"Read converted WAV file: {len(audio_data)} samples, {sample_rate} Hz"
+                    )
 
-                print(
-                    "Created SpeechRecognizer using groq_speech SDK - EXACTLY like CLI"
-                )
+                    # Clean up converted file
+                    os.unlink(wav_path)
 
-                # Perform recognition - EXACTLY like CLI
-                result = recognizer.recognize_once_async()
+                # Perform recognition on the audio data
+                result = recognizer.recognize_audio_data(audio_data, is_translation)
                 print(f"Recognition result: {result.reason}")
 
-                processing_time = time.time() - start_time
+                # Clean up temporary file
+                os.unlink(audio_file_path)
+                print(f"Cleaned up temporary file: {audio_file_path}")
 
-                # Process result - EXACTLY like CLI
-                if result.reason == ResultReason.RecognizedSpeech:
-                    print(f"✅ Recognition successful!")
-                    print(f"📝 Text: {result.text}")
-                    print(f"🎯 Confidence: {result.confidence:.2f}")
-                    print(f"🌍 Language: {result.language}")
-                    print(f"⏱️  Processing time: {processing_time:.2f}s")
+            except Exception as audio_error:
+                print(f"Error processing audio data: {audio_error}")
+                # Clean up temporary file on error
+                if audio_file_path and os.path.exists(audio_file_path):
+                    os.unlink(audio_file_path)
+                raise audio_error
 
-                    # Send the result back to the frontend
-                    await session["websocket"].send_text(
-                        json.dumps(
-                            {
-                                "type": "recognition_result",
-                                "data": {
-                                    "text": result.text,
-                                    "confidence": result.confidence or 0.95,
-                                    "language": result.language or "auto-detected",
-                                    "timestamps": result.timestamps or [],
-                                    "timing_metrics": {
-                                        "api_call": 0,
-                                        "response_processing": processing_time,
-                                        "total_time": processing_time,
-                                    },
-                                },
-                            }
-                        )
+            processing_time = time.time() - start_time
+
+            # Process result - EXACTLY like CLI
+            if result.reason == ResultReason.RecognizedSpeech:
+                print(f"✅ Recognition successful!")
+                print(f"📝 Text: {result.text}")
+                print(f"🎯 Confidence: {result.confidence:.2f}")
+                print(f"🌍 Language: {result.language}")
+                print(f"⏱️  Processing time: {processing_time:.2f}s")
+
+                # IMPORTANT: Log the transcribed text clearly for debugging
+                print(
+                    f"🎤 TRANSCRIBED TEXT: '{result.text}' (Total audio size: {len(combined_audio)} bytes)"
+                )
+
+                # Handle result based on mode
+                mode = session.get("mode", "continuous")
+
+                if mode == "single":
+                    # For single shot mode, buffer the result until stop_recognition
+                    print(f"📥 Buffering result for single shot mode: '{result.text}'")
+                    session["buffered_results"].append(
+                        {
+                            "text": result.text,
+                            "confidence": result.confidence or 0.95,
+                            "language": result.language or "auto-detected",
+                            "timestamps": result.timestamps or [],
+                            "timing_metrics": {
+                                "api_call": 0,
+                                "response_processing": processing_time,
+                                "total_time": processing_time,
+                            },
+                        }
                     )
-
-                elif result.reason == ResultReason.NoMatch:
-                    print("❌ No speech detected in the audio file")
-                    await session["websocket"].send_text(
-                        json.dumps(
-                            {
-                                "type": "recognition_error",
-                                "data": {"error": "No speech detected"},
-                            }
-                        )
-                    )
-
-                elif result.reason == ResultReason.Canceled:
                     print(
-                        f"❌ Recognition canceled: {result.cancellation_details.error_details}"
+                        f"✅ Result buffered. Total buffered: {len(session['buffered_results'])}"
                     )
-                    await session["websocket"].send_text(
-                        json.dumps(
-                            {
-                                "type": "recognition_error",
-                                "data": {"error": "Recognition canceled"},
-                            }
+                else:
+                    # For continuous mode, send result immediately
+                    print(f"📤 Sending result to frontend: '{result.text}'")
+                    try:
+                        await session["websocket"].send_text(
+                            json.dumps(
+                                {
+                                    "type": "recognition_result",
+                                    "data": {
+                                        "text": result.text,
+                                        "confidence": result.confidence or 0.95,
+                                        "language": result.language or "auto-detected",
+                                        "timestamps": result.timestamps or [],
+                                        "timing_metrics": {
+                                            "api_call": 0,
+                                            "response_processing": processing_time,
+                                            "total_time": processing_time,
+                                        },
+                                    },
+                                }
+                            )
                         )
-                    )
+                        print(f"✅ Result sent successfully to frontend")
+
+                    except Exception as send_error:
+                        print(f"❌ Failed to send result to frontend: {send_error}")
+                        # Try to close the WebSocket if it's broken
+                        try:
+                            await session["websocket"].close()
+                            print(
+                                f"🔌 Closed broken WebSocket for session {session_id}"
+                            )
+                        except Exception as close_error:
+                            print(f"Error closing WebSocket: {close_error}")
 
                 # Clear accumulated chunks after successful processing
                 session["audio_chunks"] = []
-                session["chunk_count"] = 0
-                print("Cleared audio chunks after successful processing")
 
-            except Exception as e:
-                print(f"❌ Error during recognition: {e}")
-                await send_recognition_error(session_id, str(e))
+            elif result.reason == ResultReason.NoMatch:
+                print("❌ No speech detected in the audio file")
+                print(
+                    f"🎤 NO SPEECH DETECTED (Total audio size: {len(combined_audio)} bytes)"
+                )
+                # Clear accumulated chunks even for no match
+                session["audio_chunks"] = []
 
-            finally:
-                # Clean up the temporary file if it was created
-                if audio_file_path and os.path.exists(audio_file_path):
-                    try:
-                        os.unlink(audio_file_path)
-                        print("Cleaned up temporary file")
-                    except Exception as cleanup_error:
-                        print(f"Error cleaning up temporary file: {cleanup_error}")
+            elif result.reason == ResultReason.Canceled:
+                print(
+                    f"❌ Recognition canceled: {result.cancellation_details.error_details}"
+                )
+                print(
+                    f"🎤 RECOGNITION CANCELED (Total audio size: {len(combined_audio)} bytes)"
+                )
+                await session["websocket"].send_text(
+                    json.dumps(
+                        {
+                            "type": "recognition_error",
+                            "data": {"error": "Recognition canceled"},
+                        }
+                    )
+                )
+                # Clear accumulated chunks on error
+                session["audio_chunks"] = []
 
         except Exception as e:
-            print(f"Error combining audio chunks: {e}")
-            await send_recognition_error(session_id, str(e))
+            print(f"❌ Error during recognition: {e}")
+            # Only send error for actual errors, not for no speech detected
+            if "no speech" not in str(e).lower():
+                await send_recognition_error(session_id, str(e))
+            # Clear accumulated chunks on error
+            session["audio_chunks"] = []
 
-    else:
-        # Not enough chunks yet, just acknowledge receipt
-        print(
-            f"Accumulating audio chunks: {session['chunk_count']}/{min_chunks} chunks, {sum(len(chunk) for chunk in session['audio_chunks'])}/{min_total_size} bytes"
-        )
-        # Send acknowledgment that chunk was received
-        await session["websocket"].send_text(
-            json.dumps(
-                {
-                    "type": "chunk_received",
-                    "data": {
-                        "chunk_count": session["chunk_count"],
-                        "total_size": sum(
-                            len(chunk) for chunk in session["audio_chunks"]
-                        ),
-                    },
-                }
-            )
-        )
+        finally:
+            # Clean up the temporary file if it was created
+            if audio_file_path and os.path.exists(audio_file_path):
+                try:
+                    os.unlink(audio_file_path)
+                    print("Cleaned up temporary file")
+                except Exception as cleanup_error:
+                    print(f"Error cleaning up temporary file: {cleanup_error}")
+
+    except Exception as e:
+        print(f"Error processing audio chunk: {e}")
+        await send_recognition_error(session_id, str(e))
 
 
 async def send_recognition_result(session_id: str, result):
@@ -753,8 +983,6 @@ def get_app() -> FastAPI:
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     print("🚀 Starting Groq Speech API Server...")
     print("📖 API Documentation: http://localhost:8000/docs")
     print("🔍 Health Check: http://localhost:8000/health")

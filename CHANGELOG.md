@@ -11,26 +11,17 @@ This release represents a complete transformation of the Groq Speech SDK, introd
 ### ✨ Added
 
 #### New Demo Applications
-- **Voice Assistant Demo** (`examples/voice_assistant_demo.py`)
-  - Interactive GUI application with Tkinter
-  - Command processing (time, date, search, web navigation)
-  - Conversation history and visual feedback
-  - Keyboard shortcuts and help system
-  - Real-world voice assistant functionality
+- **CLI Speech Recognition** (`examples/cli_speech_recognition.py`)
+  - Command-line interface with single and continuous modes
+  - Transcription and translation capabilities
+  - Configurable chunking parameters
+  - Real-time speech recognition from microphone
 
-- **Transcription Workbench** (`examples/transcription_workbench.py`)
-  - Professional transcription tool with advanced features
-  - File-based and live transcription
-  - Export capabilities (TXT, JSON formats)
-  - Real-time analysis and statistics
-  - Session management and confidence tracking
-
-- **Web Demo** (`examples/web_demo.py`)
-  - Modern web interface using Flask and Socket.IO
-  - Real-time statistics and visual feedback
-  - Responsive design with HTML5/CSS3/JavaScript
-  - Browser-based speech recognition
-  - Professional UI with animations and status indicators
+- **Web UI Demo** (`examples/groq-speech-ui/`)
+  - Next.js frontend with real-time speech recognition
+  - Single-shot and continuous recognition modes
+  - Performance metrics and visualizations
+  - Modern, responsive interface with Tailwind CSS
 
 #### Production API Server
 - **FastAPI Server** (`api/server.py`)
@@ -44,7 +35,7 @@ This release represents a complete transformation of the Groq Speech SDK, introd
 #### Enhanced Deployment Architecture
 - **Multi-service Docker Compose** (`deployment/docker/docker-compose.yml`)
   - FastAPI server (port 8000)
-  - Flask web demo (port 5000)
+  - Next.js frontend (port 3000)
   - Redis for session management
   - Nginx load balancer
   - Prometheus monitoring
@@ -52,7 +43,7 @@ This release represents a complete transformation of the Groq Speech SDK, introd
 
 - **Docker Configurations**
   - Main Dockerfile for API server
-  - Web demo Dockerfile (`deployment/docker/Dockerfile.web`)
+  - Frontend Dockerfile (`examples/groq-speech-ui/Dockerfile`)
   - Development and testing profiles
   - Health checks and security configurations
 
@@ -63,12 +54,11 @@ This release represents a complete transformation of the Groq Speech SDK, introd
   - Security considerations
   - Performance optimization strategies
 
-- **Deployment Guide** (`docs/deployment-guide.md`)
-  - Local development setup
-  - Docker deployment instructions
-  - Kubernetes deployment
-  - Cloud deployment (AWS, GCP, Azure)
-  - Monitoring and troubleshooting
+- **Configuration Guide** (`groq_speech/env.template`)
+  - Environment-based configuration
+  - Configurable chunking parameters
+  - Performance tuning options
+  - Audio processing settings
 
 ### 🔄 Changed
 

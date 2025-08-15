@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        .log {
+            background: #f0f0f0;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+        }
+
+        input {
+            padding: 8px;
+            margin: 10px;
+            width: 300px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🧪 WebSocket Connection Test</h1>
+
+    <div>
+        <button onclick="testWebSocket()">🔌 Test WebSocket Connection</button>
+        <button onclick="testRecognizeWebSocket()">🎤 Test Recognition WebSocket</button>
+        <button onclick="clearLogs()">🗑️ Clear Logs</button>
+    </div>
+
+    <div>
+        <input type="text" id="testMessage" placeholder="Enter test message" value="Hello WebSocket!">
+        <button onclick="sendTestMessage()">📤 Send Message</button>
+    </div>
+
+    <div class="log" id="log">
+        <strong>Log Output:</strong><br>
+        Ready to test WebSocket connections...
+    </div>
+
+    <script>
+        let ws = null;
+        let recognizeWs = null;
+
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `<br>[${timestamp}] ${message}`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('log').innerHTML = '<strong>Log Output:</strong><br>Logs cleared...';
+        }
+
+        function testWebSocket() {
+            log('🧪 Testing basic WebSocket connection...');
+
+            if (ws) {
+                ws.close();
+            }
+
+            ws = new WebSocket('ws://localhost:8000/ws/test');
+
+            ws.onopen = function () {
+                log('✅ WebSocket test connection opened');
+            };
+
+            ws.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+                log(`📨 Test message received: ${JSON.stringify(data)}`);
+            };
+
+            ws.onerror = function (error) {
+                log(`❌ WebSocket test error: ${error}`);
+            };
+
+            ws.onclose = function (event) {
+                log(`🔌 WebSocket test closed: ${event.code} - ${event.reason}`);
+            };
+        }
+
+        function testRecognizeWebSocket() {
+            log('🎤 Testing recognition WebSocket connection...');
+
+            if (recognizeWs) {
+                recognizeWs.close();
+            }
+
+            recognizeWs = new WebSocket('ws://localhost:8000/ws/recognize');
+
+            recognizeWs.onopen = function () {
+                log('✅ Recognition WebSocket connection opened');
+                log('📡 Sending start_recognition message...');
+
+                recognizeWs.send(JSON.stringify({
+                    type: 'start_recognition',
+                    data: {
+                        model: 'whisper-large-v3-turbo',
+                        is_translation: false,
+                        target_language: 'en'
+                    }
+                }));
+
+                log('✅ start_recognition message sent');
+            };
+
+            recognizeWs.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+                log(`📨 Recognition message received: ${JSON.stringify(data)}`);
+            };
+
+            recognizeWs.onerror = function (error) {
+                log(`❌ Recognition WebSocket error: ${error}`);
+            };
+
+            recognizeWs.onclose = function (event) {
+                log(`🔌 Recognition WebSocket closed: ${event.code} - ${event.reason}`);
+            };
+        }
+
+        function sendTestMessage() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const message = document.getElementById('testMessage').value;
+                log(`📤 Sending test message: ${message}`);
+                ws.send(message);
+            } else {
+                log('❌ WebSocket not connected. Please test connection first.');
+            }
+        }
+    </script>
+</body>
+
+</html>

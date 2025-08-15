@@ -2,9 +2,8 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/your-repo/groq-speech)
 
-High-performance speech recognition using Groq's AI services with comprehensive timing metrics and accuracy improvements.
+High-performance speech recognition using Groq's AI services with comprehensive timing metrics, configurable chunking, and real-time processing.
 
 ## 🚀 Quick Start
 
@@ -86,7 +85,12 @@ GROQ_API_KEY=your_actual_groq_api_key_here
 
 # Optional - API Configuration
 GROQ_API_BASE_URL=https://api.groq.com/openai/v1
-GROQ_MODEL_ID=whisper-large-v3-turbo
+GROQ_MODEL_ID=whisper-large-v3
+
+# Optional - Chunking Configuration (New!)
+CONTINUOUS_BUFFER_DURATION=12.0      # Buffer duration in seconds
+CONTINUOUS_OVERLAP_DURATION=3.0      # Overlap duration in seconds
+CONTINUOUS_CHUNK_SIZE=1024           # Audio chunk size in samples
 
 # Optional - Performance Tuning
 AUDIO_CHUNK_DURATION=1.0
@@ -101,9 +105,23 @@ DEFAULT_SILENCE_TIMEOUT=2
 ```
 groq-speech/
 ├── groq_speech/           # Core SDK
+│   ├── __init__.py        # Main SDK interface
+│   ├── speech_recognizer.py     # Recognition engine
+│   ├── speech_config.py         # Speech configuration
+│   ├── audio_config.py          # Audio I/O handling
+│   ├── audio_processor.py       # Audio processing
+│   ├── config.py               # Environment configuration
+│   ├── exceptions.py           # Custom exceptions
+│   ├── property_id.py          # Property definitions
+│   └── result_reason.py        # Result constants
 ├── api/                   # FastAPI server
+│   ├── server.py               # Main API server
+│   ├── models/                 # Request/response models
+│   └── requirements.txt        # API dependencies
 ├── examples/
-│   └── groq-speech-ui/   # Next.js frontend
+│   ├── cli_speech_recognition.py  # CLI example with single/continuous modes
+│   ├── groq-speech-ui/         # Next.js web interface
+│   └── requirements.txt        # Example dependencies
 ├── deployment/docker/     # Docker configurations
 ├── requirements.txt       # Development dependencies
 ├── requirements-dev.txt   # Development tools
@@ -113,16 +131,44 @@ groq-speech/
 
 ## 🎤 **Usage Examples**
 
-### Basic Recognition
+### CLI Speech Recognition
+
+```bash
+# Continuous transcription (default)
+python examples/cli_speech_recognition.py --mode transcription
+
+# Single transcription mode
+python examples/cli_speech_recognition.py --mode transcription --recognition-mode single
+
+# Continuous translation
+python examples/cli_speech_recognition.py --mode translation --target-language en
+
+# Single translation mode
+python examples/cli_speech_recognition.py --mode translation --recognition-mode single
+
+# List available options
+python examples/cli_speech_recognition.py --help
+```
+
+### Python SDK Usage
+
 ```python
 from groq_speech import SpeechConfig, SpeechRecognizer
 
-recognizer = SpeechRecognizer(SpeechConfig())
+# Basic recognition
+config = SpeechConfig()
+recognizer = SpeechRecognizer(config)
 result = recognizer.recognize_once_async()
 
-if result.timing_metrics:
-    timing = result.timing_metrics.get_metrics()
-    print(f"Total time: {timing['total_time']*1000:.1f}ms")
+# Translation mode
+config.enable_translation = True
+recognizer = SpeechRecognizer(config)
+result = recognizer.recognize_once_async()
+
+# Continuous recognition
+recognizer.start_continuous_recognition()
+# ... handle events ...
+recognizer.stop_continuous_recognition()
 ```
 
 ### Web UI Demo
@@ -130,18 +176,6 @@ if result.timing_metrics:
 2. Open http://localhost:3000
 3. Click "Start Recording" to begin speech recognition
 4. Use "Mock Mode" for testing without API key
-
-### CLI Example
-```bash
-# Test CLI functionality
-python examples/cli_speech_recognition.py --help
-
-# List available models
-python examples/cli_speech_recognition.py --list-models
-
-# List available languages
-python examples/cli_speech_recognition.py --list-languages
-```
 
 ## 🧪 **Testing**
 
@@ -152,8 +186,8 @@ python -m pytest tests/
 # Run with coverage
 python -m pytest tests/ --cov=groq_speech --cov=api
 
-# Run timing metrics test
-python test_timing_metrics.py
+# Test CLI functionality
+python examples/cli_speech_recognition.py --help
 ```
 
 ## 🚀 **Development Workflow**
@@ -191,6 +225,7 @@ docker-compose up --build
 - **Accuracy**: 95% confidence
 - **Memory Usage**: Optimized buffer management
 - **Network Efficiency**: Audio compression and connection pooling
+- **Configurable Chunking**: Prevent word loss with customizable buffer sizes
 
 ## 🔒 **Security Features**
 

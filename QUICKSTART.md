@@ -1,10 +1,10 @@
 # 🚀 Quick Start Guide
 
-## **Get groq-speech-ui running in under 5 minutes!**
+## **Get groq-speech running in under 5 minutes!**
 
 ### **Prerequisites**
 - Python 3.8+ and pip
-- Node.js 18+ and npm
+- Node.js 18+ and npm (for web UI)
 - Groq API key from [console.groq.com](https://console.groq.com)
 
 ### **Step 1: Setup**
@@ -44,12 +44,29 @@ npm run dev
 ```
 
 ### **Step 3: Use the App**
+
+#### **🌐 Web Interface**
 1. Open http://localhost:3000
 2. Click "Start Recording"
 3. Speak into your microphone
 4. See real-time transcription!
 
-### **🎉 That's it! You're ready to use groq-speech-ui!**
+#### **💻 CLI Interface**
+```bash
+# Test CLI functionality
+python examples/cli_speech_recognition.py --help
+
+# Continuous transcription (default)
+python examples/cli_speech_recognition.py --mode transcription
+
+# Single transcription mode
+python examples/cli_speech_recognition.py --mode transcription --recognition-mode single
+
+# Translation to English
+python examples/cli_speech_recognition.py --mode translation --target-language en
+```
+
+### **🎉 That's it! You're ready to use groq-speech!**
 
 ---
 
@@ -84,6 +101,29 @@ examples/cli_speech_recognition.py (consumes groq_speech)
 api/server.py (consumes groq_speech)
     ↓
 examples/groq-speech-ui (consumes api via HTTP)
+```
+
+---
+
+## **⚙️ Configuration Options**
+
+### **Chunking Parameters (New!)**
+```bash
+# Customize audio processing behavior
+export CONTINUOUS_BUFFER_DURATION=8.0      # 8-second buffers
+export CONTINUOUS_OVERLAP_DURATION=2.0     # 2-second overlap
+export CONTINUOUS_CHUNK_SIZE=512           # Smaller chunks
+
+# Or set inline
+CONTINUOUS_BUFFER_DURATION=8.0 python examples/cli_speech_recognition.py --mode transcription
+```
+
+### **Performance Tuning**
+```bash
+# Audio processing optimization
+export AUDIO_CHUNK_DURATION=1.0
+export AUDIO_BUFFER_SIZE=16384
+export AUDIO_SILENCE_THRESHOLD=0.005
 ```
 
 ---

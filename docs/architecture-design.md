@@ -14,13 +14,13 @@ The Groq Speech SDK is a comprehensive Python library that provides real-time sp
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐ │
-│  │   Core SDK      │    │   API Server    │    │   Demos     │ │
-│  │                 │    │                 │    │             │ │
-│  │ • SpeechConfig  │    │ • FastAPI       │    │ • Voice     │ │
-│  │ • AudioConfig   │    │ • WebSocket     │    │   Assistant │ │
-│  │ • Recognizer    │    │ • REST API      │    │ • Workbench │ │
-│  │ • Results       │    │ • gRPC (future) │    │ • Web Demo  │ │
-│  └─────────────────┘    └─────────────────┘    └─────────────┘ │
+│  │   Core SDK      │    │   API Server    │   │   Demos     │ │
+│  │                 │    │                 │   │             │ │
+│  │ • SpeechConfig  │    │ • FastAPI       │   │ • CLI Tool  │ │
+│  │ • AudioConfig   │    │ • WebSocket     │   │ • Web UI    │ │
+│  │ • Recognizer    │    │ • REST API      │   │ • Examples  │ │
+│  │ • Results       │    │ • gRPC (future) │   │             │ │
+│  └─────────────────┘    └─────────────────┘   └─────────────┘ │
 │           │                       │                       │     │
 │           └───────────────────────┼───────────────────────┘     │
 │                                   │                             │
@@ -58,6 +58,7 @@ The core SDK provides the fundamental speech recognition functionality:
 - Language detection
 - Word-level timestamps
 - Semantic segmentation
+- Configurable chunking with overlap
 
 ### 2. API Server (`api/`)
 
@@ -88,238 +89,200 @@ A production-ready FastAPI server that exposes the SDK functionality:
 
 Real-world demonstration applications:
 
-#### Voice Assistant Demo (`voice_assistant_demo.py`)
+#### CLI Speech Recognition (`cli_speech_recognition.py`)
 
-- **Features**: GUI interface, command processing, conversation history
-- **UI**: Tkinter-based desktop application
-- **Commands**: Time, date, search, web navigation, help
-- **Technology**: Threading, event-driven architecture
+- **Features**: Single and continuous recognition modes, transcription and translation
+- **Modes**: Single-shot (one-time) and continuous (real-time streaming)
+- **Operations**: Transcription and translation to English
+- **Technology**: Configurable chunking, environment-based configuration
 
-#### Transcription Workbench (`transcription_workbench.py`)
+#### Web UI Demo (`groq-speech-ui/`)
 
-- **Features**: Professional transcription tool, file handling, export
-- **UI**: Multi-panel interface with live transcription and analysis
-- **Export**: Text and JSON formats
-- **Analysis**: Confidence metrics, language detection, statistics
-
-#### Web Demo (`web_demo.py`)
-
-- **Features**: Modern web interface, real-time statistics
-- **UI**: Responsive web design with Socket.IO
-- **Technology**: Flask, Socket.IO, HTML5/CSS3/JavaScript
-- **Deployment**: Docker containerization
-
-## Deployment Architecture
-
-### Docker-based Deployment
-
-```yaml
-# docker-compose.yml
-services:
-  groq-speech-api:      # FastAPI server (port 8000)
-  groq-speech-web-demo: # Flask web demo (port 5000)
-  redis:                # Session management
-  nginx:                # Load balancer
-  prometheus:           # Monitoring
-  grafana:              # Visualization
-```
-
-### Microservices Architecture
-
-1. **API Gateway** (Nginx)
-   - Load balancing
-   - SSL termination
-   - Rate limiting
-   - Health checks
-
-2. **Application Services**
-   - FastAPI server (main API)
-   - Flask web demo (user interface)
-   - Background workers (future)
-
-3. **Data Layer**
-   - Redis (session management)
-   - File storage (uploads)
-   - Logs (structured logging)
-
-4. **Monitoring Stack**
-   - Prometheus (metrics collection)
-   - Grafana (visualization)
-   - Health checks
+- **Features**: Next.js frontend with real-time speech recognition
+- **UI**: Modern, responsive interface with Tailwind CSS
+- **Capabilities**: Single-shot and continuous recognition, performance metrics
+- **Technology**: React, TypeScript, Web Audio API
 
 ## Data Flow
 
-### Real-time Recognition Flow
+### Speech Recognition Pipeline
 
 ```
-1. Client → WebSocket → API Server
-2. API Server → SpeechRecognizer
-3. SpeechRecognizer → Groq API
-4. Groq API → Whisper Model
-5. Whisper Model → Transcription
-6. Transcription → API Server → Client
+Microphone → AudioConfig → AudioProcessor → VAD → SpeechRecognizer → Groq API → Response Processing → Result
 ```
 
-### File-based Recognition Flow
+### Continuous Recognition Flow
 
 ```
-1. Client → REST API → API Server
-2. API Server → AudioConfig → File
-3. SpeechRecognizer → Groq API
-4. Groq API → Whisper Model
-5. Whisper Model → Transcription
-6. Transcription → API Server → Client
+Audio Stream → Chunking (Configurable) → Buffer Accumulation → API Call → Result Processing → Event Triggering
 ```
 
-## Configuration Management
+### Translation Pipeline
 
-### Environment Variables
-
-```bash
-# Required
-GROQ_API_KEY=your_api_key_here
-
-# Optional
-GROQ_API_BASE_URL=https://api.groq.com/openai/v1
-DEFAULT_LANGUAGE=en-US
-DEFAULT_SAMPLE_RATE=16000
-DEFAULT_CHANNELS=1
-DEFAULT_CHUNK_SIZE=1024
-DEFAULT_TIMEOUT=30
-ENABLE_SEMANTIC_SEGMENTATION=true
-ENABLE_LANGUAGE_IDENTIFICATION=true
-LOG_LEVEL=INFO
-ENVIRONMENT=production
+```
+Audio Input → Language Detection → Groq Translation API → English Output → Result Display
 ```
 
-### Configuration Classes
+## Configuration System
 
-- **`Config`**: Centralized configuration management
-- **`SpeechConfig`**: Speech-specific settings
-- **`AudioConfig`**: Audio device and format settings
+### Environment-Based Configuration
 
-## Security Considerations
+The SDK uses a centralized configuration system that loads settings from environment variables:
 
-### API Security
+```python
+from groq_speech import Config
 
-- API key validation
-- Request rate limiting
-- Input validation and sanitization
-- CORS configuration
-- Error message sanitization
+# Get configuration categories
+api_key = Config.get_api_key()
+model_config = Config.get_model_config()
+audio_config = Config.get_audio_config()
+chunking_config = Config.get_chunking_config()
+```
 
-### Deployment Security
+### Configurable Parameters
 
-- Non-root container users
-- Minimal base images
-- Security updates
-- Network isolation
-- Secrets management
+#### Chunking Configuration (New!)
+- `CONTINUOUS_BUFFER_DURATION`: Duration of audio buffers (default: 12.0s)
+- `CONTINUOUS_OVERLAP_DURATION`: Overlap between chunks (default: 3.0s)
+- `CONTINUOUS_CHUNK_SIZE`: Size of audio chunks (default: 1024 samples)
 
-## Performance Optimization
+#### Audio Processing
+- `AUDIO_CHUNK_DURATION`: Audio chunk duration (default: 1.0s)
+- `AUDIO_BUFFER_SIZE`: Buffer size for processing (default: 16384)
+- `AUDIO_SILENCE_THRESHOLD`: Silence detection threshold (default: 0.005)
+- `AUDIO_VAD_ENABLED`: Voice activity detection (default: true)
 
-### Caching Strategy
-
-- Redis for session management
-- Response caching (future)
-- Connection pooling
-
-### Scalability
-
-- Horizontal scaling with load balancer
-- Async/await for I/O operations
-- Background task processing
-- Resource monitoring
-
-### Monitoring
-
-- Health checks
-- Metrics collection
-- Log aggregation
-- Performance profiling
+#### Performance Settings
+- `ENABLE_AUDIO_COMPRESSION`: Audio compression (default: true)
+- `ENABLE_AUDIO_CACHING`: Audio caching (default: true)
+- `MAX_AUDIO_FILE_SIZE`: Maximum file size in MB (default: 25)
 
 ## Error Handling
 
-### Error Types
+### Exception Hierarchy
 
-1. **API Errors**: Invalid requests, authentication failures
-2. **Recognition Errors**: No speech detected, model errors
-3. **Network Errors**: Connection timeouts, service unavailable
-4. **System Errors**: Resource exhaustion, configuration issues
+The SDK provides a comprehensive exception hierarchy:
 
-### Error Response Format
+- **`GroqSpeechException`**: Base exception class
+- **`ConfigurationError`**: Configuration-related errors
+- **`AudioProcessingError`**: Audio processing failures
+- **`APIError`**: Groq API communication errors
+- **`RecognitionError`**: Speech recognition failures
 
-```json
-{
-  "success": false,
-  "error": "Error description",
-  "error_code": "ERROR_CODE",
-  "timestamp": "2024-01-01T00:00:00Z"
-}
+### Error Recovery
+
+- Automatic retry mechanisms for transient failures
+- Graceful degradation for non-critical errors
+- Detailed error context for debugging
+- User-friendly error messages
+
+## Performance Optimization
+
+### Audio Processing
+
+- **Voice Activity Detection (VAD)**: Prevents processing of silence
+- **Audio Compression**: Reduces network bandwidth
+- **Buffer Management**: Optimized memory usage
+- **Chunking Strategy**: Configurable overlap prevents word loss
+
+### API Optimization
+
+- **Connection Pooling**: Reuses HTTP connections
+- **Request Batching**: Groups multiple requests when possible
+- **Response Caching**: Caches common responses
+- **Async Processing**: Non-blocking I/O operations
+
+### Memory Management
+
+- **Streaming Audio**: Processes audio in chunks
+- **Garbage Collection**: Automatic cleanup of audio buffers
+- **Resource Pooling**: Reuses audio processing objects
+- **Memory Monitoring**: Tracks memory usage
+
+## Security Features
+
+### API Key Management
+
+- Secure storage in environment variables
+- No hardcoded credentials
+- Backend-only access to sensitive data
+- CORS protection for web applications
+
+### Input Validation
+
+- Audio format validation
+- File size limits
+- Request rate limiting
+- Malicious input detection
+
+## Deployment Architecture
+
+### Development Environment
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │   Backend       │    │   Groq API      │
+│   (Next.js)     │◄──►│   (FastAPI)     │◄──►│   (External)    │
+│   Port 3000     │    │   Port 8000     │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-## Testing Strategy
+### Production Environment
 
-### Test Types
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Load Balancer │    │   API Servers   │    │   Groq API      │
+│   (Nginx)       │◄──►│   (FastAPI)     │◄──►│   (External)    │
+│                 │    │   (Multiple)    │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │
+         ▼
+┌─────────────────┐
+│   Frontend      │
+│   (CDN)         │
+└─────────────────┘
+```
 
-1. **Unit Tests**: Individual component testing
-2. **Integration Tests**: API endpoint testing
-3. **End-to-End Tests**: Complete workflow testing
-4. **Performance Tests**: Load and stress testing
+## Monitoring and Observability
 
-### Test Coverage
+### Health Checks
 
-- Core SDK functionality
-- API endpoints
-- Demo applications
-- Error scenarios
-- Configuration validation
+- **API Health**: `/health` endpoint with status information
+- **Service Health**: Docker health checks for containers
+- **Dependency Health**: Groq API connectivity monitoring
 
-## Development Workflow
+### Performance Metrics
 
-### Local Development
+- **Timing Metrics**: Detailed performance tracking
+- **Success Rates**: Recognition success/failure tracking
+- **Resource Usage**: Memory and CPU monitoring
+- **API Latency**: Response time monitoring
 
-1. **Setup**: Clone repository, install dependencies
-2. **Configuration**: Set environment variables
-3. **Testing**: Run test suite
-4. **Development**: Use hot reload for API server
-5. **Demo**: Run demo applications
+### Logging
 
-### Production Deployment
-
-1. **Build**: Docker image creation
-2. **Test**: Integration testing
-3. **Deploy**: Container orchestration
-4. **Monitor**: Health checks and metrics
-5. **Scale**: Load balancing and scaling
+- **Structured Logging**: JSON-formatted log entries
+- **Log Levels**: Configurable verbosity
+- **Context Information**: Request IDs and user context
+- **Performance Logging**: Timing and resource usage
 
 ## Future Enhancements
 
 ### Planned Features
 
-1. **gRPC Support**: High-performance binary protocol
-2. **GraphQL API**: Flexible query interface
-3. **Mobile SDKs**: Android and iOS support
-4. **Advanced Analytics**: Usage patterns and insights
-5. **Custom Models**: Fine-tuned model support
+- **gRPC Support**: High-performance RPC communication
+- **Streaming Recognition**: Real-time audio streaming
+- **Multi-Model Support**: Support for additional AI models
+- **Advanced Analytics**: Detailed performance analysis
+- **Plugin System**: Extensible architecture for custom features
 
-### Architecture Evolution
+### Scalability Improvements
 
-1. **Service Mesh**: Istio integration
-2. **Event Streaming**: Kafka integration
-3. **Machine Learning**: Custom model training
-4. **Edge Computing**: Local processing capabilities
-5. **Multi-tenancy**: SaaS platform features
+- **Horizontal Scaling**: Multiple API server instances
+- **Load Balancing**: Intelligent request distribution
+- **Caching Layer**: Redis-based response caching
+- **Queue System**: Asynchronous request processing
+- **Microservices**: Service decomposition for better scalability
 
-## Conclusion
+---
 
-The Groq Speech SDK architecture is designed for:
-
-- **Modularity**: Clear separation of concerns
-- **Scalability**: Horizontal scaling capabilities
-- **Reliability**: Comprehensive error handling
-- **Security**: Production-ready security measures
-- **Maintainability**: Clean code and documentation
-- **Extensibility**: Plugin architecture for future features
-
-This architecture provides a solid foundation for building speech-enabled applications while maintaining flexibility for future enhancements and customizations. 
+*This architecture design document provides a comprehensive overview of the Groq Speech SDK's system design, components, and implementation details.* 
