@@ -8,6 +8,5 @@ __version__ = "1.0.0"
 __author__ = "Groq Speech SDK Contributors"
 __email__ = "support@groq.com"
 
-from .server import create_app, get_app
-
-__all__ = ["create_app", "get_app"]
+# Simplified server - no need for create_app or get_app functions
+__all__ = []

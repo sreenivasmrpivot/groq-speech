@@ -32,13 +32,12 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
     const [results, setResults] = useState<RecognitionResult[]>([]);
     const [currentResult, setCurrentResult] = useState<RecognitionResult | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [targetLanguage, setTargetLanguage] = useState('en');
+    const [targetLanguage] = useState('en');
     const [selectedLanguage, setSelectedLanguage] = useState('en-US');
     const [recordingDuration, setRecordingDuration] = useState(0);
     const [showMetrics, setShowMetrics] = useState(false);
 
     const audioRecorderRef = useRef<AudioRecorder | null>(null);
-    const websocketRef = useRef<WebSocket | null>(null);
     const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const apiClientRef = useRef<GroqAPIClient | MockGroqAPIClient | null>(null);
 
@@ -66,7 +65,7 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
     useEffect(() => {
         audioRecorderRef.current = new AudioRecorder();
 
-        audioRecorderRef.current.setOnRecordingComplete(async (audioBlob, duration) => {
+        audioRecorderRef.current.setOnRecordingComplete(async (audioBlob) => {
             setIsRecording(false);
             setIsProcessing(true);
             setRecordingDuration(0);
@@ -78,19 +77,22 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
             try {
                 // For single mode, send audio data to backend via REST API
                 if (recognitionMode.type === 'single' && apiClientRef.current) {
-                    console.log('Processing single mode audio:', audioBlob.size, 'bytes');
+                    console.log('🎯 Processing single mode audio:', audioBlob.size, 'bytes');
 
                     // Convert Blob to ArrayBuffer for the API call
                     const arrayBuffer = await audioBlob.arrayBuffer();
-                    console.log('Converted to ArrayBuffer:', arrayBuffer.byteLength, 'bytes');
+                    console.log('🔄 Converted to ArrayBuffer:', arrayBuffer.byteLength, 'bytes');
 
+                    console.log('📤 Calling API with audio data...');
                     const result = await apiClientRef.current.transcribeAudio(
                         arrayBuffer,
                         recognitionMode.operation === 'translation',
                         targetLanguage
                     );
 
-                    console.log('Single mode result received:', result);
+                    console.log('✅ Single mode result received:', result);
+                    console.log('📝 Result text:', result.text);
+                    console.log('🎯 Result confidence:', result.confidence);
 
                     // Update performance metrics
                     setPerformanceMetrics(prev => ({
@@ -100,11 +102,18 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                         avg_response_time: (prev.avg_response_time * prev.total_requests + (result.timing_metrics?.total_time || 0)) / (prev.total_requests + 1),
                     }));
 
-                    setResults(prev => [...prev, result]);
+                    // Update UI with results
+                    setResults(prev => {
+                        const newResults = [...prev, result];
+                        console.log('📊 Results updated, total:', newResults.length);
+                        return newResults;
+                    });
+
                     setCurrentResult(result);
+                    console.log('🎯 Current result set:', result.text);
                 }
             } catch (err) {
-                console.error('Recognition error:', err);
+                console.error('❌ Recognition error:', err);
                 setError(err instanceof Error ? err.message : 'Recognition failed');
 
                 setPerformanceMetrics(prev => ({
@@ -139,145 +148,121 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                 throw new Error('Microphone is not available. Please check your microphone connection and permissions.');
             }
 
-            console.log('Starting single mode recording...');
+            if (recognitionMode.type === 'single') {
+                console.log('🎯 Starting SINGLE SHOT mode recording...');
 
-            // For single shot mode, we use WebSocket but don't process results until stop
-            websocketRef.current = await apiClientRef.current.transcribeWithWebSocket(
-                (result) => {
-                    // In single shot mode, we don't update UI until recording stops
-                    console.log('Single mode: Received recognition result (buffered):', result);
-
-                    // Store the result temporarily - it will be processed when recording stops
-                    // The backend will send all buffered results when stop_recognition is called
-                },
-                (error) => {
-                    console.error('Single mode: WebSocket error:', error);
-                    setError(error);
-                },
-                selectedLanguage,
-                recognitionMode.operation === 'translation',
-                'single'  // Specify mode as 'single'
-            );
-
-            // Set up custom message handler for single shot mode
-            websocketRef.current.addEventListener('message', (event) => {
-                try {
-                    const message = JSON.parse(event.data);
-                    if (message.type === 'recognition_stopped' && recognitionMode.type === 'single') {
-                        console.log('Single mode: Recognition stopped, processing final results...');
-                        // The backend will have already sent all buffered results
-                        // We just need to mark recording as stopped
-                        setIsRecording(false);
-                    }
-                } catch (error) {
-                    console.error('Error parsing WebSocket message:', error);
-                }
-            });
-
-            // Wait for WebSocket to be ready
-            if (websocketRef.current.readyState !== WebSocket.OPEN) {
-                console.log('Waiting for WebSocket to be ready...');
-                await new Promise<void>((resolve, reject) => {
-                    const checkState = () => {
-                        if (websocketRef.current?.readyState === WebSocket.OPEN) {
-                            console.log('WebSocket is now ready');
-                            resolve();
-                        } else if (websocketRef.current?.readyState === WebSocket.CLOSED) {
-                            reject(new Error('WebSocket connection failed'));
-                        } else {
-                            setTimeout(checkState, 100);
-                        }
-                    };
-                    checkState();
+                // For single shot mode, we use REST API (transcribeAudio)
+                // Set up data available callback for single mode
+                console.log('Setting up data available callback for single mode...');
+                audioRecorderRef.current.setOnDataAvailable(async (chunk) => {
+                    console.log('Audio chunk received in single mode:', chunk.size, 'bytes');
+                    // Don't send to WebSocket - we'll process when recording stops
                 });
+
+                // Start audio recording
+                console.log('Starting single mode audio recording...');
+                await audioRecorderRef.current.startRecording();
+
+                // Start duration timer
+                durationIntervalRef.current = setInterval(() => {
+                    if (audioRecorderRef.current) {
+                        setRecordingDuration(prev => prev + 100);
+                    }
+                }, 100);
+
+            } else {
+                console.log('🔄 Starting CONTINUOUS mode recording...');
+
+                // For continuous mode, we use WebSocket
+                // Set up data available callback for continuous mode
+                console.log('Setting up data available callback for continuous mode...');
+                audioRecorderRef.current.setOnDataAvailable(async (chunk) => {
+                    console.log('Audio chunk received in continuous mode:', chunk.size, 'bytes');
+                    // Process audio chunk directly for continuous mode
+                    if (apiClientRef.current) {
+                        try {
+                            console.log('🔄 Processing audio chunk for continuous mode...');
+                            const arrayBuffer = await chunk.arrayBuffer();
+                            const result = await (apiClientRef.current as GroqAPIClient).transcribeAudio(
+                                arrayBuffer,
+                                recognitionMode.operation === 'translation',
+                                targetLanguage
+                            );
+
+                            // Update UI immediately
+                            setResults(prevResults => [...prevResults, result]);
+                            setCurrentResult(result);
+                            console.log('✅ Continuous mode result:', result.text);
+                        } catch (error) {
+                            console.error('Error processing audio chunk:', error);
+                            setError('Failed to process audio chunk: ' + (error as Error).message);
+                        }
+                    } else {
+                        console.warn('API client not available');
+                    }
+                });
+
+                // Start audio recording AFTER setting up callback
+                console.log('Starting continuous mode audio recording...');
+                await audioRecorderRef.current.startRecording();
+
+                // Start duration timer
+                durationIntervalRef.current = setInterval(() => {
+                    if (audioRecorderRef.current) {
+                        setRecordingDuration(prev => prev + 100);
+                    }
+                }, 100);
             }
 
-            // Set up data available callback for single mode
-            console.log('Setting up data available callback for single mode...');
-            audioRecorderRef.current.setOnDataAvailable(async (chunk) => {
-                console.log('Audio chunk received in single mode:', chunk.size, 'bytes');
-                // Send audio chunk to WebSocket for processing (results will be buffered until stop)
-                if (websocketRef.current && apiClientRef.current) {
-                    try {
-                        console.log('Sending audio chunk to WebSocket...');
-                        await (apiClientRef.current as any).sendAudioData(websocketRef.current, chunk);
-                    } catch (error) {
-                        console.error('Error sending audio chunk:', error);
-                        setError('Failed to send audio chunk: ' + (error as Error).message);
-                    }
-                } else {
-                    console.warn('WebSocket or API client not available');
-                }
-            });
-
-            // Start audio recording AFTER WebSocket is ready
-            console.log('Starting single mode audio recording...');
-            await audioRecorderRef.current.startRecording();
-
-            // Start duration timer
-            durationIntervalRef.current = setInterval(() => {
-                if (audioRecorderRef.current) {
-                    setRecordingDuration(audioRecorderRef.current.getRecordingDuration());
-                }
-            }, 100);
-
-        } catch (err) {
-            console.error('Failed to start recording:', err);
-            setError(err instanceof Error ? err.message : 'Failed to access microphone. Please check permissions.');
+        } catch (error) {
+            console.error('Error starting recording:', error);
+            setError(error instanceof Error ? error.message : 'Failed to start recording');
             setIsRecording(false);
         }
-    }, [selectedLanguage, recognitionMode.operation]);
+    }, [selectedLanguage, recognitionMode.operation, recognitionMode.type]);
 
     const stopRecording = useCallback(async () => {
         if (!audioRecorderRef.current || !isRecording) return;
 
         try {
-            console.log('🛑 Stopping single mode recording...');
+            if (recognitionMode.type === 'single') {
+                console.log('🛑 Stopping SINGLE SHOT mode recording...');
 
-            // 1. Stop audio recording FIRST
-            console.log('🎤 Stopping audio recording...');
-            audioRecorderRef.current.stopRecording();
-            console.log('✅ Audio recording stopped');
+                // For single shot mode, stop recording and process the audio
+                audioRecorderRef.current.stopRecording();
+                console.log('✅ Audio recording stopped');
 
-            // 2. Send stop_recognition message to backend to get final result
-            if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-                try {
-                    console.log('📡 Sending stop_recognition message to backend...');
-                    await (apiClientRef.current as any).sendStopRecognition(websocketRef.current);
-                    console.log('✅ Stop recognition message sent');
+                // The audio will be processed by the onRecordingComplete callback
+                // which calls transcribeAudio() via the REST API
 
-                    // Wait a bit for backend to process the stop message and send final result
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                } catch (error) {
-                    console.error('❌ Error sending stop recognition:', error);
+            } else {
+                console.log('🛑 Stopping CONTINUOUS mode recording...');
+
+                // For continuous mode, send stop_recognition message to backend
+                if (apiClientRef.current) {
+                    try {
+                        console.log('🛑 Stopping continuous mode recording...');
+                        // No need to send stop message since we're not using WebSocket
+                        console.log('✅ Continuous mode recording stopped');
+                    } catch (error) {
+                        console.error('❌ Error stopping continuous mode:', error);
+                    }
                 }
             }
 
-            // 3. Close WebSocket connection
-            if (websocketRef.current) {
-                console.log('🔌 Closing WebSocket connection...');
-                websocketRef.current.close();
-                websocketRef.current = null;
-                console.log('✅ WebSocket connection closed');
-            }
-
-            // 4. Reset state
+            // Reset state
             setIsRecording(false);
-            console.log('✅ Single mode recording stopped successfully');
+            console.log('✅ Recording stopped successfully');
 
         } catch (error) {
-            console.error('❌ Error stopping single mode recording:', error);
+            console.error('❌ Error stopping recording:', error);
             // Force cleanup even if there's an error
-            if (websocketRef.current) {
-                websocketRef.current.close();
-                websocketRef.current = null;
-            }
             if (audioRecorderRef.current) {
                 audioRecorderRef.current.stopRecording();
             }
             setIsRecording(false);
         }
-    }, [isRecording]);
+    }, [isRecording, recognitionMode.type]);
 
     const startContinuousRecognition = useCallback(async () => {
         if (!apiClientRef.current) return;
@@ -286,141 +271,111 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
             setError(null);
             setIsRecording(true);
             setCurrentResult(null);
+            setResults([]); // Clear previous results for fresh start
 
-            websocketRef.current = await apiClientRef.current.transcribeWithWebSocket(
-                (result) => {
-                    console.log('🎯 Received recognition result in component:', result);
-                    console.log('📝 Result text:', result.text);
-                    console.log('🔄 Current results state length:', results.length);
-
-                    setResults(prev => {
-                        const newResults = [...prev, result];
-                        console.log('📊 Updated results array length:', newResults.length);
-                        return newResults;
-                    });
-
-                    setCurrentResult(result);
-                    console.log('🎯 Set current result:', result.text);
-
-                    setPerformanceMetrics(prev => ({
-                        ...prev,
-                        total_requests: prev.total_requests + 1,
-                        successful_recognitions: prev.successful_recognitions + 1,
-                        avg_response_time: (prev.avg_response_time * prev.total_requests + (result.timing_metrics?.total_time || 0)) / (prev.total_requests + 1),
-                    }));
-
-                    console.log('✅ All state updates completed for result');
-                },
-                (error) => {
-                    console.error('❌ WebSocket error received in component:', error);
-                    setError(error);
-                    setPerformanceMetrics(prev => ({
-                        ...prev,
-                        total_requests: prev.total_requests + 1,
-                        failed_recognitions: prev.failed_recognitions + 1,
-                    }));
-                },
-                selectedLanguage,
-                recognitionMode.operation === 'translation',
-                'continuous'  // Specify mode as 'continuous'
-            );
-
-            console.log('WebSocket connection established:', websocketRef.current.readyState);
-
-            // Wait for WebSocket to be ready
-            if (websocketRef.current.readyState !== WebSocket.OPEN) {
-                console.log('Waiting for WebSocket to be ready...');
-                await new Promise<void>((resolve, reject) => {
-                    const checkState = () => {
-                        if (websocketRef.current?.readyState === WebSocket.OPEN) {
-                            console.log('WebSocket is now ready');
-                            resolve();
-                        } else if (websocketRef.current?.readyState === WebSocket.CLOSED) {
-                            reject(new Error('WebSocket connection closed'));
-                        } else {
-                            setTimeout(checkState, 100);
-                        }
-                    };
-                    checkState();
-                });
-            }
+            console.log('🔄 Starting CONTINUOUS mode with improved audio processing...');
 
             // Set up audio recording for continuous recognition
             if (audioRecorderRef.current) {
                 // Set up data available callback BEFORE starting recording
                 console.log('Setting up data available callback for continuous mode...');
+
+                // Accumulate audio chunks for better language detection (like CLI does)
+                let audioChunks: Blob[] = [];
+                let lastProcessTime = Date.now();
+                const minChunkDuration = 2000; // Process every 2 seconds for better language detection
+
                 audioRecorderRef.current.setOnDataAvailable(async (chunk) => {
-                    console.log('Audio chunk received in continuous mode:', chunk.size, 'bytes');
-                    // Send audio chunk to WebSocket for real-time processing
-                    if (websocketRef.current && apiClientRef.current) {
+                    console.log('🎤 Audio chunk received in continuous mode:', chunk.size, 'bytes');
+
+                    // Accumulate audio chunks
+                    audioChunks.push(chunk);
+                    const currentTime = Date.now();
+
+                    // Process accumulated chunks every 2 seconds (like CLI processes longer segments)
+                    if (currentTime - lastProcessTime >= minChunkDuration && audioChunks.length > 0) {
                         try {
-                            console.log('Sending audio chunk to WebSocket...');
-                            await (apiClientRef.current as any).sendAudioData(websocketRef.current, chunk);
+                            console.log(`🔄 Processing ${audioChunks.length} accumulated audio chunks...`);
+
+                            // Combine all accumulated chunks into one audio segment
+                            const combinedBlob = new Blob(audioChunks, { type: chunk.type });
+                            const arrayBuffer = await combinedBlob.arrayBuffer();
+
+                            console.log(`📊 Combined audio: ${combinedBlob.size} bytes from ${audioChunks.length} chunks`);
+
+                            if (apiClientRef.current) {
+                                console.log('📤 Calling API for accumulated audio chunks...');
+                                const result = await (apiClientRef.current as GroqAPIClient).transcribeAudio(
+                                    arrayBuffer,
+                                    recognitionMode.operation === 'translation',
+                                    targetLanguage
+                                );
+
+                                console.log('✅ Transcription result:', result.text);
+                                console.log('🎯 Result confidence:', result.confidence);
+                                console.log('🌍 Detected language:', result.language);
+
+                                // Update UI immediately
+                                setResults(prevResults => {
+                                    const newResults = [...prevResults, result];
+                                    console.log('📊 Results updated, total:', newResults.length);
+                                    return newResults;
+                                });
+
+                                setCurrentResult(result);
+                                console.log('🎯 Current result updated:', result.text);
+
+                                // Update performance metrics
+                                setPerformanceMetrics(prev => ({
+                                    ...prev,
+                                    total_requests: prev.total_requests + 1,
+                                    successful_recognitions: prev.successful_recognitions + 1,
+                                    avg_response_time: (prev.avg_response_time * prev.total_requests + (result.timing_metrics?.total_time || 0)) / (prev.total_requests + 1),
+                                }));
+                            }
+
+                            // Reset accumulated chunks after processing
+                            audioChunks = [];
+                            lastProcessTime = currentTime;
+
                         } catch (error) {
-                            console.error('Error sending audio chunk:', error);
-                            setError('Failed to send audio chunk: ' + (error as Error).message);
+                            console.error('❌ Error processing accumulated audio chunks:', error);
+                            setError('Failed to process audio chunks: ' + (error as Error).message);
                         }
-                    } else {
-                        console.warn('WebSocket or API client not available');
                     }
                 });
 
                 // Start recording for continuous mode AFTER setting up callback
-                console.log('Starting continuous mode recording...');
+                console.log('🎤 Starting continuous mode audio recording...');
                 await audioRecorderRef.current.startRecording();
+                console.log('✅ Continuous mode recording started successfully');
             }
 
         } catch (err) {
-            console.error('Failed to start continuous recognition:', err);
+            console.error('❌ Failed to start continuous recognition:', err);
             setError('Failed to start continuous recognition');
             setIsRecording(false);
         }
-    }, [selectedLanguage, recognitionMode]);
+    }, [selectedLanguage, recognitionMode, targetLanguage]);
 
     const stopContinuousRecognition = useCallback(async () => {
         console.log('🛑 Stopping continuous recognition...');
 
         try {
-            // 1. Stop audio recording FIRST
+            // Stop audio recording
             if (audioRecorderRef.current && isRecording) {
                 console.log('🎤 Stopping audio recording...');
                 audioRecorderRef.current.stopRecording();
                 console.log('✅ Audio recording stopped');
             }
 
-            // 2. Send stop_recognition message to backend
-            if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-                try {
-                    console.log('📡 Sending stop_recognition message to backend...');
-                    await (apiClientRef.current as any).sendStopRecognition(websocketRef.current);
-                    console.log('✅ Stop recognition message sent');
-
-                    // Wait a bit for backend to process the stop message
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                } catch (error) {
-                    console.error('❌ Error sending stop recognition:', error);
-                }
-            }
-
-            // 3. Close WebSocket connection
-            if (websocketRef.current) {
-                console.log('🔌 Closing WebSocket connection...');
-                websocketRef.current.close();
-                websocketRef.current = null;
-                console.log('✅ WebSocket connection closed');
-            }
-
-            // 4. Reset state
+            // Reset state
             setIsRecording(false);
             console.log('✅ Continuous recognition stopped successfully');
 
         } catch (error) {
             console.error('❌ Error stopping continuous recognition:', error);
             // Force cleanup even if there's an error
-            if (websocketRef.current) {
-                websocketRef.current.close();
-                websocketRef.current = null;
-            }
             if (audioRecorderRef.current) {
                 audioRecorderRef.current.stopRecording();
             }
@@ -429,9 +384,14 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
     }, [isRecording]);
 
     const handleStart = useCallback(() => {
+        console.log('🚀 handleStart called');
+        console.log('🎯 Current recognition mode:', recognitionMode.type);
+
         if (recognitionMode.type === 'continuous') {
+            console.log('🔄 Starting CONTINUOUS mode...');
             startContinuousRecognition();
         } else {
+            console.log('🎯 Starting SINGLE SHOT mode...');
             startRecording();
         }
     }, [recognitionMode.type, startRecording, startContinuousRecognition]);
@@ -512,7 +472,10 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                         </label>
                         <div className="flex space-x-2">
                             <button
-                                onClick={() => setRecognitionMode(prev => ({ ...prev, type: 'single' }))}
+                                onClick={() => {
+                                    console.log('🎯 Single Shot button clicked');
+                                    setRecognitionMode(prev => ({ ...prev, type: 'single' }));
+                                }}
                                 className={`px-4 py-2 rounded-lg border transition-colors ${recognitionMode.type === 'single'
                                     ? 'bg-blue-600 text-white border-blue-600'
                                     : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
@@ -522,7 +485,10 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                                 Single Shot
                             </button>
                             <button
-                                onClick={() => setRecognitionMode(prev => ({ ...prev, type: 'continuous' }))}
+                                onClick={() => {
+                                    console.log('🔄 Continuous button clicked');
+                                    setRecognitionMode(prev => ({ ...prev, type: 'continuous' }));
+                                }}
                                 className={`px-4 py-2 rounded-lg border transition-colors ${recognitionMode.type === 'continuous'
                                     ? 'bg-blue-600 text-white border-blue-600'
                                     : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
@@ -531,6 +497,9 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                                 <Play className="h-4 w-4 inline mr-2" />
                                 Continuous
                             </button>
+                        </div>
+                        <div className="mt-2 text-sm text-gray-500">
+                            Current mode: <span className="font-medium">{recognitionMode.type}</span>
                         </div>
                     </div>
 

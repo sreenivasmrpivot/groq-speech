@@ -63,6 +63,7 @@ class CLISpeechRecognition:
     def __init__(self) -> None:
         self.recognizer: Optional[SpeechRecognizer] = None
         self.is_recording: bool = False
+        self.is_single_mode_recording: bool = False  # Track single mode recording
         self.audio_config: Optional[AudioConfig] = None
         self._setup_signal_handlers()
 
@@ -95,7 +96,12 @@ class CLISpeechRecognition:
 
     def _signal_handler(self, signum: int, frame) -> None:
         """Handle interrupt signals gracefully."""
-        if not self.is_recording:
+        if self.is_single_mode_recording:
+            # For single mode, set flag to stop recording loop
+            print(f"\n🛑 Received signal {signum}, stopping single mode recording...")
+            self.is_single_mode_recording = False
+            return
+        elif not self.is_recording:
             # Already stopping, exit immediately
             sys.exit(0)
 
@@ -289,22 +295,36 @@ class CLISpeechRecognition:
 
                 try:
                     with self.audio_config as audio:
+                        print("🎤 Starting microphone stream...")
+                        audio.start_microphone_stream()
                         print("🎤 Recording audio... (Press Ctrl+C to stop recording)")
+
+                        # Set single mode recording flag
+                        self.is_single_mode_recording = True
 
                         # Collect audio chunks until user stops
                         audio_chunks = []
                         start_time = time.time()
                         max_duration = 120  # 2 minutes max
 
-                        while time.time() - start_time < max_duration:
+                        while (
+                            time.time() - start_time < max_duration
+                            and self.is_single_mode_recording
+                        ):
                             try:
+                                # Check if we should stop recording
+                                if not self.is_single_mode_recording:
+                                    print("\n🛑 Recording stopped by signal handler")
+                                    break
+
                                 chunk = audio.read_audio_chunk(1024)
                                 if chunk and len(chunk) > 0:
                                     audio_chunks.append(chunk)
                                     print(".", end="", flush=True)  # Show progress
-                            except KeyboardInterrupt:
-                                print("\n🛑 Recording stopped by user")
-                                break
+
+                                # Small delay to allow signal handling to work
+                                time.sleep(0.01)
+
                             except Exception as e:
                                 print(f"\n❌ Error reading audio: {e}")
                                 break
@@ -319,6 +339,11 @@ class CLISpeechRecognition:
                         combined_audio = b"".join(audio_chunks)
                         audio_array = np.frombuffer(combined_audio, dtype=np.int16)
                         audio_array_float = audio_array.astype(np.float32) / 32768.0
+
+                        print(
+                            f"🎵 Processed {len(audio_chunks)} audio chunks ({len(combined_audio)} bytes)"
+                        )
+                        print("🔄 Sending audio to Groq API for recognition...")
 
                         # Process the audio data
                         result = self.recognizer.recognize_audio_data(audio_array_float)
@@ -350,6 +375,9 @@ class CLISpeechRecognition:
                 except Exception as e:
                     print(f"\n❌ Error in single recognition: {e}")
                     return
+                finally:
+                    # Always reset the flag
+                    self.is_single_mode_recording = False
 
             else:  # continuous mode
                 print("🔄 Continuous recognition mode - speak continuously")
@@ -454,29 +482,41 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python cli_speech_recognition.py --mode transcription
-  python cli_speech_recognition.py --mode translation --target-language en
+  # Single-shot transcription (speak once, get result)
+  python cli_speech_recognition.py --mode transcription --recognition-mode single
+  
+  # Continuous transcription (speak continuously, real-time results)
+  python cli_speech_recognition.py --mode transcription --recognition-mode continuous
+  
+  # Single-shot translation to Spanish
+  python cli_speech_recognition.py --mode translation --recognition-mode single --target-language es
+  
+  # File-based recognition
   python cli_speech_recognition.py --file audio.wav
+  
+  # List available models and languages
+  python cli_speech_recognition.py --list-models
+  python cli_speech_recognition.py --list-languages
         """,
     )
 
     parser.add_argument(
         "--mode",
         choices=["transcription", "translation"],
-        help="Recognition mode (transcription or translation)",
+        help="Operation mode: transcription (speech-to-text) or translation (speech-to-text in target language)",
     )
 
     parser.add_argument(
         "--recognition-mode",
         choices=["single", "continuous"],
         default="continuous",
-        help="Recognition mode: single (one-time) or continuous (default: continuous)",
+        help="Recognition mode: single (record once, process, show result) or continuous (real-time streaming results)",
     )
 
     parser.add_argument(
         "--target-language",
         default="en",
-        help="Target language for translation (default: en)",
+        help="Target language code for translation (e.g., 'es' for Spanish, 'fr' for French)",
     )
 
     parser.add_argument(

@@ -12,7 +12,7 @@ export default function Home() {
     const [isConfigured, setIsConfigured] = useState(false);
     const [showBackendConfig, setShowBackendConfig] = useState(false);
     const [backendStatus, setBackendStatus] = useState<'checking' | 'configured' | 'not-configured' | 'error'>('checking');
-    const [apiClient, setApiClient] = useState<GroqAPIClient | null>(null);
+    const [, setApiClient] = useState<GroqAPIClient | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isClient, setIsClient] = useState(false);
 
@@ -194,7 +194,7 @@ export default function Home() {
                                             Mock API Mode
                                         </h3>
                                         <p className="text-sm text-blue-700 mt-1">
-                                            You're currently using the mock API for demonstration purposes.
+                                            You&apos;re currently using the mock API for demonstration purposes.
                                             This mode simulates speech recognition without requiring a backend server.
                                         </p>
                                     </div>

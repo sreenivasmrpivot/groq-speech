@@ -44,6 +44,7 @@ ENV PIP_NO_CACHE_DIR=1
 # Install system dependencies for API
 RUN apt-get update && apt-get install -y \
     build-essential \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
@@ -71,6 +72,7 @@ RUN apt-get update && apt-get install -y \
     libportaudiocpp0 \
     libasound2 \
     libsndfile1 \
+    ffmpeg \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
