@@ -40,6 +40,7 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
     const audioRecorderRef = useRef<AudioRecorder | null>(null);
     const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const apiClientRef = useRef<GroqAPIClient | MockGroqAPIClient | null>(null);
+    const [webSocketRef, setWebSocketRef] = useState<WebSocket | null>(null);
 
     // Performance metrics
     const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics>({
@@ -273,83 +274,111 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
             setCurrentResult(null);
             setResults([]); // Clear previous results for fresh start
 
-            console.log('🔄 Starting CONTINUOUS mode with improved audio processing...');
+            console.log('🔄 Starting CONTINUOUS mode with WebSocket...');
 
-            // Set up audio recording for continuous recognition
-            if (audioRecorderRef.current) {
-                // Set up data available callback BEFORE starting recording
-                console.log('Setting up data available callback for continuous mode...');
+            // Connect to WebSocket for continuous recognition
+            const ws = new WebSocket('ws://localhost:8000/ws/recognize');
 
-                // Accumulate audio chunks for better language detection (like CLI does)
-                let audioChunks: Blob[] = [];
-                let lastProcessTime = Date.now();
-                const minChunkDuration = 2000; // Process every 2 seconds for better language detection
+            ws.onopen = () => {
+                console.log('🔌 WebSocket connected for continuous recognition');
 
-                audioRecorderRef.current.setOnDataAvailable(async (chunk) => {
-                    console.log('🎤 Audio chunk received in continuous mode:', chunk.size, 'bytes');
+                // Send start recognition message
+                ws.send(JSON.stringify({
+                    type: 'start_recognition',
+                    is_translation: recognitionMode.operation === 'translation',
+                    target_language: targetLanguage
+                }));
+            };
 
-                    // Accumulate audio chunks
-                    audioChunks.push(chunk);
-                    const currentTime = Date.now();
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('📨 WebSocket message received:', data);
 
-                    // Process accumulated chunks every 2 seconds (like CLI processes longer segments)
-                    if (currentTime - lastProcessTime >= minChunkDuration && audioChunks.length > 0) {
-                        try {
-                            console.log(`🔄 Processing ${audioChunks.length} accumulated audio chunks...`);
+                    switch (data.type) {
+                        case 'recognition_started':
+                            console.log('✅ Continuous recognition started');
+                            break;
 
-                            // Combine all accumulated chunks into one audio segment
-                            const combinedBlob = new Blob(audioChunks, { type: chunk.type });
-                            const arrayBuffer = await combinedBlob.arrayBuffer();
+                        case 'recognition_result':
+                            console.log('📝 Recognition result:', data.text);
 
-                            console.log(`📊 Combined audio: ${combinedBlob.size} bytes from ${audioChunks.length} chunks`);
+                            // Create result object
+                            const result: RecognitionResult = {
+                                text: data.text || '',
+                                confidence: data.confidence || 0.95,
+                                language: data.language || 'auto-detected',
+                                timestamps: data.timestamps || [],
+                                timestamp: new Date().toISOString(),
+                                timing_metrics: {
+                                    api_call: 0,
+                                    response_processing: 0,
+                                    total_time: 0,
+                                },
+                            };
 
-                            if (apiClientRef.current) {
-                                console.log('📤 Calling API for accumulated audio chunks...');
-                                const result = await (apiClientRef.current as GroqAPIClient).transcribeAudio(
-                                    arrayBuffer,
-                                    recognitionMode.operation === 'translation',
-                                    targetLanguage
-                                );
+                            // Update UI immediately
+                            setResults(prevResults => {
+                                const newResults = [...prevResults, result];
+                                console.log('📊 Results updated, total:', newResults.length);
+                                return newResults;
+                            });
 
-                                console.log('✅ Transcription result:', result.text);
-                                console.log('🎯 Result confidence:', result.confidence);
-                                console.log('🌍 Detected language:', result.language);
+                            setCurrentResult(result);
+                            console.log('🎯 Current result updated:', result.text);
 
-                                // Update UI immediately
-                                setResults(prevResults => {
-                                    const newResults = [...prevResults, result];
-                                    console.log('📊 Results updated, total:', newResults.length);
-                                    return newResults;
-                                });
+                            // Update performance metrics
+                            setPerformanceMetrics(prev => ({
+                                ...prev,
+                                total_requests: prev.total_requests + 1,
+                                successful_recognitions: prev.successful_recognitions + 1,
+                                avg_response_time: (prev.avg_response_time * prev.total_requests + (result.timing_metrics?.total_time || 0)) / (prev.total_requests + 1),
+                            }));
+                            break;
 
-                                setCurrentResult(result);
-                                console.log('🎯 Current result updated:', result.text);
+                        case 'no_speech':
+                            console.log('🔇 No speech detected');
+                            break;
 
-                                // Update performance metrics
-                                setPerformanceMetrics(prev => ({
-                                    ...prev,
-                                    total_requests: prev.total_requests + 1,
-                                    successful_recognitions: prev.successful_recognitions + 1,
-                                    avg_response_time: (prev.avg_response_time * prev.total_requests + (result.timing_metrics?.total_time || 0)) / (prev.total_requests + 1),
-                                }));
-                            }
+                        case 'recognition_canceled':
+                            console.log('❌ Recognition canceled:', data.error);
+                            setError('Recognition canceled: ' + data.error);
+                            break;
 
-                            // Reset accumulated chunks after processing
-                            audioChunks = [];
-                            lastProcessTime = currentTime;
+                        case 'session_started':
+                            console.log('🎬 Recognition session started');
+                            break;
 
-                        } catch (error) {
-                            console.error('❌ Error processing accumulated audio chunks:', error);
-                            setError('Failed to process audio chunks: ' + (error as Error).message);
-                        }
+                        case 'session_stopped':
+                            console.log('🏁 Recognition session stopped');
+                            break;
+
+                        case 'error':
+                            console.error('❌ WebSocket error:', data.error);
+                            setError('WebSocket error: ' + data.error);
+                            break;
+
+                        default:
+                            console.log('❓ Unknown message type:', data.type);
                     }
-                });
 
-                // Start recording for continuous mode AFTER setting up callback
-                console.log('🎤 Starting continuous mode audio recording...');
-                await audioRecorderRef.current.startRecording();
-                console.log('✅ Continuous mode recording started successfully');
-            }
+                } catch (error) {
+                    console.error('❌ Error parsing WebSocket message:', error);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+                setError('WebSocket connection error');
+            };
+
+            ws.onclose = () => {
+                console.log('🔌 WebSocket connection closed');
+                setIsRecording(false);
+            };
+
+            // Store WebSocket reference for stopping
+            setWebSocketRef(ws);
 
         } catch (err) {
             console.error('❌ Failed to start continuous recognition:', err);
@@ -367,6 +396,16 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                 console.log('🎤 Stopping audio recording...');
                 audioRecorderRef.current.stopRecording();
                 console.log('✅ Audio recording stopped');
+            }
+
+            // Close WebSocket if it's open
+            if (webSocketRef && webSocketRef.readyState === WebSocket.OPEN) {
+                console.log('🔌 Sending stop message to WebSocket...');
+                webSocketRef.send(JSON.stringify({ type: 'stop_recognition' }));
+
+                console.log('🔌 Closing WebSocket...');
+                webSocketRef.close();
+                setWebSocketRef(null); // Clear the ref
             }
 
             // Reset state

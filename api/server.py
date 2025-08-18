@@ -10,6 +10,7 @@ import json
 import asyncio
 import threading
 import queue
+import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
@@ -41,7 +42,9 @@ class RecognitionRequest(BaseModel):
         "en", description="Target language for translation"
     )
     enable_timestamps: bool = Field(False, description="Enable word-level timestamps")
-    enable_language_detection: bool = Field(True, description="Enable automatic language detection")
+    enable_language_detection: bool = Field(
+        True, description="Enable automatic language detection"
+    )
 
 
 class RecognitionResponse(BaseModel):
@@ -289,260 +292,298 @@ async def get_available_models():
 
 @app.websocket("/ws/recognize")
 async def websocket_recognition(websocket: WebSocket):
-    """WebSocket endpoint for real-time speech recognition - EXACTLY like CLI continuous mode."""
-    print("🔌 New WebSocket connection request...")
+    """WebSocket endpoint for continuous speech recognition - EXACTLY like CLI."""
     await websocket.accept()
-    print("✅ WebSocket connection accepted")
-
-    active_connections.append(websocket)
-    session_id = str(id(websocket))
-
-    recognition_sessions[session_id] = {
-        "websocket": websocket,
-        "start_time": datetime.now(),
-        "is_recording": False,
-        "recognizer": None,
-        "mode": "continuous",
-        "is_translation": False,
-        "target_language": "en",
-        "model": "whisper-large-v3-turbo",
-    }
+    session_id = str(uuid.uuid4())
 
     try:
-        # Send connection confirmation
-        await websocket.send_text(
-            json.dumps({"type": "connected", "data": {"session_id": session_id}})
-        )
+        print(f"🔌 WebSocket connected: {session_id}")
 
+        # Initialize session
+        recognition_sessions[session_id] = {
+            "websocket": websocket,
+            "recognizer": None,
+            "is_recording": False,
+        }
+
+        # Wait for start message
         while True:
-            message = await websocket.receive_text()
-            data = json.loads(message)
+            try:
+                message = await websocket.receive_text()
+                data = json.loads(message)
+                message_type = data.get("type")
 
-            if data["type"] == "start_recognition":
-                await handle_start_recognition(session_id, data.get("data", {}))
-            elif data["type"] == "stop_recognition":
-                await handle_stop_recognition(session_id)
-            elif data["type"] == "audio_data":
-                await handle_audio_data(session_id, data.get("data", {}))
-            elif data["type"] == "ping":
-                await websocket.send_text(json.dumps({"type": "pong"}))
+                if message_type == "start_recognition":
+                    await handle_start_recognition(session_id, data)
+                elif message_type == "stop_recognition":
+                    await handle_stop_recognition(session_id)
+                elif message_type == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+                else:
+                    print(f"❌ Unknown message type: {message_type}")
+
+            except json.JSONDecodeError:
+                print("❌ Invalid JSON message")
+            except Exception as e:
+                print(f"❌ Error processing message: {e}")
+                await websocket.send_text(
+                    json.dumps({"type": "error", "error": str(e)})
+                )
 
     except WebSocketDisconnect:
-        print(f"🔌 WebSocket disconnected for session {session_id}")
+        print(f"🔌 WebSocket disconnected: {session_id}")
     except Exception as e:
-        print(f"💥 WebSocket error for session {session_id}: {e}")
+        print(f"❌ WebSocket error: {e}")
     finally:
-        # Cleanup
-        if websocket in active_connections:
-            active_connections.remove(websocket)
+        # Cleanup session
         if session_id in recognition_sessions:
-            del recognition_sessions[session_id]
+            await cleanup_session(session_id)
 
 
-# Remove unused queue processing function and callback handlers
+async def process_result_queue(session_id: str):
+    """Process results from the thread-safe queue and send to frontend."""
+    try:
+        session = recognition_sessions.get(session_id)
+        if not session:
+            return
+
+        websocket = session["websocket"]
+        result_queue = session.get("result_queue")
+
+        if not result_queue:
+            return
+
+        print(f"🔄 Starting result queue processor for session: {session_id}")
+
+        while session.get("is_recording", False):
+            try:
+                # Check for results in the queue (non-blocking)
+                try:
+                    event_type, data = result_queue.get_nowait()
+                except queue.Empty:
+                    # No results yet, wait a bit
+                    await asyncio.sleep(0.1)
+                    continue
+
+                print(f"📨 Processing {event_type} event from queue")
+
+                # Process the event based on type
+                if event_type == "recognized":
+                    if data.reason == ResultReason.RecognizedSpeech:
+                        print(f"📝 Recognition result: {data.text}")
+
+                        # Send result to frontend
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "recognition_result",
+                                    "text": data.text,
+                                    "confidence": data.confidence,
+                                    "language": data.language,
+                                    "timestamps": (
+                                        data.timestamps
+                                        if hasattr(data, "timestamps")
+                                        else None
+                                    ),
+                                }
+                            )
+                        )
+                    elif data.reason == ResultReason.NoMatch:
+                        print("❌ No speech detected")
+                        await websocket.send_text(
+                            json.dumps(
+                                {"type": "no_speech", "message": "No speech detected"}
+                            )
+                        )
+
+                elif event_type == "canceled":
+                    if (
+                        hasattr(data, "cancellation_details")
+                        and data.cancellation_details
+                    ):
+                        error_msg = data.cancellation_details.error_details
+                    else:
+                        error_msg = "Recognition canceled"
+
+                    print(f"❌ Recognition canceled: {error_msg}")
+                    await websocket.send_text(
+                        json.dumps({"type": "recognition_canceled", "error": error_msg})
+                    )
+
+                elif event_type == "session_started":
+                    print(f"🎬 Recognition session started for: {session_id}")
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "session_started",
+                                "message": "Recognition session started",
+                            }
+                        )
+                    )
+
+                elif event_type == "session_stopped":
+                    print(f"� Recognition session stopped for: {session_id}")
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "session_stopped",
+                                "message": "Recognition session stopped",
+                            }
+                        )
+                    )
+
+            except Exception as e:
+                print(f"❌ Error processing result from queue: {e}")
+                await asyncio.sleep(0.1)
+
+    except Exception as e:
+        print(f"❌ Error in result queue processor: {e}")
+    finally:
+        print(f"🔄 Result queue processor stopped for session: {session_id}")
 
 
-async def handle_start_recognition(session_id: str, config: Dict[str, Any]):
-    """Handle start recognition request - EXACTLY like CLI single mode but for chunks."""
+async def handle_start_recognition(session_id: str, data: dict):
+    """Start continuous recognition - EXACTLY like CLI."""
     try:
         session = recognition_sessions[session_id]
-        session["is_recording"] = True
-        session["mode"] = config.get("mode", "continuous")
-        session["is_translation"] = config.get("is_translation", False)
-        session["target_language"] = config.get("target_language", "en")
-        session["model"] = config.get("model", "whisper-large-v3-turbo")
+        websocket = session["websocket"]
+
+        print(f"🎤 Starting continuous recognition for session: {session_id}")
+
+        # Get recognition parameters
+        is_translation = data.get("is_translation", False)
+        target_language = data.get("target_language", "en")
 
         # Setup speech configuration - EXACTLY like CLI
         speech_config = get_speech_config(
-            model=session["model"],
-            is_translation=session["is_translation"],
-            target_language=session["target_language"],
+            model=None,
+            is_translation=is_translation,
+            target_language=target_language,
         )
 
         # Create recognizer - EXACTLY like CLI
-        session["recognizer"] = SpeechRecognizer(speech_config)
+        recognizer = SpeechRecognizer(speech_config)
+        session["recognizer"] = recognizer
 
-        # Send confirmation
-        await session["websocket"].send_text(
-            json.dumps({"type": "recognition_started", "data": {"status": "listening"}})
+        # Set up event handlers - EXACTLY like CLI
+        # Use thread-safe queue for communication between groq_speech callbacks and main event loop
+        result_queue = queue.Queue()
+
+        def on_recognized(result):
+            """Thread-safe callback for recognized speech."""
+            try:
+                result_queue.put(("recognized", result))
+            except Exception as e:
+                print(f"❌ Error in recognized callback: {e}")
+
+        def on_canceled(result):
+            """Thread-safe callback for canceled recognition."""
+            try:
+                result_queue.put(("canceled", result))
+            except Exception as e:
+                print(f"❌ Error in canceled callback: {e}")
+
+        def on_session_started(event):
+            """Thread-safe callback for session started."""
+            try:
+                result_queue.put(("session_started", event))
+            except Exception as e:
+                print(f"❌ Error in session started callback: {e}")
+
+        def on_session_stopped(event):
+            """Thread-safe callback for session stopped."""
+            try:
+                result_queue.put(("session_stopped", event))
+            except Exception as e:
+                print(f"❌ Error in session stopped callback: {e}")
+
+        # Connect the thread-safe callbacks
+        recognizer.connect("recognized", on_recognized)
+        recognizer.connect("canceled", on_canceled)
+        recognizer.connect("session_started", on_session_started)
+        recognizer.connect("session_stopped", on_session_stopped)
+
+        # Store the queue in the session for processing
+        session["result_queue"] = result_queue
+
+        # Start continuous recognition - EXACTLY like CLI
+        print("🎤 Calling recognizer.start_continuous_recognition()...")
+        recognizer.start_continuous_recognition()
+
+        session["is_recording"] = True
+
+        # Start background task to process results from the queue
+        asyncio.create_task(process_result_queue(session_id))
+
+        # Send success message
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "recognition_started",
+                    "message": "Continuous recognition started",
+                }
+            )
         )
 
+        print(f"✅ Continuous recognition started for session: {session_id}")
+
     except Exception as e:
-        await send_recognition_error(session_id, str(e))
+        print(f"❌ Error starting recognition: {e}")
+        await websocket.send_text(
+            json.dumps(
+                {"type": "error", "error": f"Failed to start recognition: {str(e)}"}
+            )
+        )
 
 
 async def handle_stop_recognition(session_id: str):
-    """Handle stop recognition request - EXACTLY like CLI."""
-    if session_id in recognition_sessions:
+    """Stop continuous recognition - EXACTLY like CLI."""
+    try:
         session = recognition_sessions[session_id]
-        session["is_recording"] = False
+        websocket = session["websocket"]
 
-        # Stop continuous recognition - EXACTLY like CLI
-        if session["recognizer"]:
+        print(f"🛑 Stopping continuous recognition for session: {session_id}")
+
+        if session["recognizer"] and session["is_recording"]:
+            # Stop continuous recognition - EXACTLY like CLI
             session["recognizer"].stop_continuous_recognition()
-            session["recognizer"] = None
+            session["is_recording"] = False
 
-        await session["websocket"].send_text(
-            json.dumps({"type": "recognition_stopped", "data": {"status": "stopped"}})
-        )
-
-
-async def handle_audio_data(session_id: str, data: Dict[str, Any]):
-    """Handle incoming audio data for continuous recognition."""
-    if session_id not in recognition_sessions:
-        return
-
-    session = recognition_sessions[session_id]
-    if not session.get("is_recording", False):
-        return
-
-    try:
-        # Get audio data from message
-        audio_data = data.get("audio_data")
-        if not audio_data:
-            print("❌ No audio data received")
-            return
-
-        # Convert base64 audio data to numpy array
-        import base64
-        import numpy as np
-
-        audio_bytes = base64.b64decode(audio_data)
-        audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-        audio_array_float = audio_array.astype(np.float32) / 32768.0
-
-        print(
-            f"🎤 Received audio chunk: {len(audio_bytes)} bytes, {len(audio_array)} samples"
-        )
-
-        # Process audio with groq_speech recognizer using recognize_audio_data
-        if session["recognizer"]:
-            try:
-                print("🎤 Processing audio chunk with groq_speech...")
-                result = session["recognizer"].recognize_audio_data(audio_array_float)
-
-                if result.reason == ResultReason.RecognizedSpeech:
-                    print(f"✅ Recognition successful: '{result.text}'")
-
-                    # Send result directly to WebSocket
-                    result_data = {
-                        "type": "recognition_result",
-                        "data": {
-                            "text": result.text,
-                            "confidence": result.confidence or 0.95,
-                            "language": result.language or "auto-detected",
-                            "timestamps": result.timestamps or [],
-                            "timing_metrics": {
-                                "api_call": 0,
-                                "response_processing": 0,
-                                "total_time": 0,
-                            },
-                        },
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "recognition_stopped",
+                        "message": "Continuous recognition stopped",
                     }
-
-                    await session["websocket"].send_text(json.dumps(result_data))
-                    print(f"📤 Result sent to frontend: '{result.text}'")
-
-                elif result.reason == ResultReason.NoMatch:
-                    print("❌ No speech detected in audio chunk")
-                else:
-                    print(f"❌ Recognition failed: {result.reason}")
-
-            except Exception as e:
-                print(f"💥 Error in audio recognition: {e}")
-                import traceback
-
-                traceback.print_exc()
-        else:
-            print("❌ No recognizer available for audio processing")
-
-    except Exception as e:
-        print(f"💥 Error processing audio data: {e}")
-        import traceback
-
-        traceback.print_exc()
-
-
-# Thread-safe callback handlers for groq_speech events
-def handle_recognized_callback(session_id: str, result):
-    """Handle recognized speech events - thread-safe callback."""
-    if session_id not in recognition_sessions:
-        return
-
-    session = recognition_sessions[session_id]
-    if not session.get("is_recording", False):
-        return
-
-    if result.reason == ResultReason.RecognizedSpeech:
-        print(f"✅ Recognition successful: '{result.text}'")
-
-        # Put result in queue for async processing
-        result_data = {
-            "type": "recognition_result",
-            "data": {
-                "text": result.text,
-                "confidence": result.confidence or 0.95,
-                "language": result.language or "auto-detected",
-                "timestamps": result.timestamps or [],
-                "timing_metrics": {
-                    "api_call": 0,
-                    "response_processing": 0,
-                    "total_time": 0,
-                },
-            },
-        }
-
-        try:
-            session["result_queue"].put(result_data)
-        except Exception as e:
-            print(f"Error putting result in queue: {e}")
-
-
-def handle_canceled_callback(session_id: str, result):
-    """Handle canceled recognition events - thread-safe callback."""
-    if session_id not in recognition_sessions:
-        return
-
-    session = recognition_sessions[session_id]
-    result_data = {
-        "type": "recognition_error",
-        "data": {"error": "Recognition canceled"},
-    }
-
-    try:
-        session["result_queue"].put(result_data)
-    except Exception as e:
-        print(f"Error putting canceled result in queue: {e}")
-
-
-def handle_session_started_callback(session_id: str, event):
-    """Handle session started events - thread-safe callback."""
-    if session_id not in recognition_sessions:
-        return
-
-    session = recognition_sessions[session_id]
-    print(f"🎬 Session started for {session_id}")
-
-
-def handle_session_stopped_callback(session_id: str, event):
-    """Handle session stopped events - thread-safe callback."""
-    if session_id not in recognition_sessions:
-        return
-
-    session = recognition_sessions[session_id]
-    print(f"🏁 Session stopped for {session_id}")
-
-
-async def send_recognition_error(session_id: str, error_message: str):
-    """Send error message to WebSocket client."""
-    if session_id in recognition_sessions:
-        session = recognition_sessions[session_id]
-        try:
-            await session["websocket"].send_text(
-                json.dumps({"type": "error", "data": {"error": error_message}})
+                )
             )
-        except Exception as e:
-            print(f"Error sending error message: {e}")
+
+            print(f"✅ Continuous recognition stopped for session: {session_id}")
+        else:
+            await websocket.send_text(
+                json.dumps({"type": "error", "error": "No active recognition session"})
+            )
+
+    except Exception as e:
+        print(f"❌ Error stopping recognition: {e}")
+        await websocket.send_text(
+            json.dumps(
+                {"type": "error", "error": f"Failed to stop recognition: {str(e)}"}
+            )
+        )
+
+
+async def cleanup_session(session_id: str):
+    """Clean up recognition session."""
+    try:
+        session = recognition_sessions.get(session_id)
+        if session:
+            if session["recognizer"] and session.get("is_recording", False):
+                session["recognizer"].stop_continuous_recognition()
+            del recognition_sessions[session_id]
+            print(f"🧹 Cleaned up session: {session_id}")
+    except Exception as e:
+        print(f"❌ Error cleaning up session: {e}")
 
 
 if __name__ == "__main__":
