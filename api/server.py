@@ -245,7 +245,7 @@ async def translate_speech(request: RecognitionRequest):
         speech_config.enable_translation = True
         print(f"🔀 Translation mode enabled (target: {request.target_language})")
 
-        # Create recognizer - EXACTLY like CLI
+        # Create recognizer - EXACTLY like CLI (AFTER enabling translation)
         recognizer = SpeechRecognizer(speech_config)
 
         # Convert base64 audio data
