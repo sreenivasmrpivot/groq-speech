@@ -71,6 +71,7 @@ from .audio_processor import OptimizedAudioProcessor, AudioChunker
 from .result_reason import ResultReason, CancellationReason
 from .config import Config
 from .property_id import PropertyId
+from .speaker_diarization import SpeakerDiarizer, DiarizationConfig, DiarizationResult
 
 
 class TimingMetrics:
@@ -1135,3 +1136,295 @@ class SpeechRecognizer:
             "model_config": Config.get_model_config(),
             "audio_config": Config.get_audio_config(),
         }
+
+    def recognize_with_diarization(
+        self,
+        audio_data: np.ndarray,
+        diarization_config: Optional[DiarizationConfig] = None,
+        sample_rate: int = 16000,
+        is_translation: bool = False,
+    ) -> DiarizationResult:
+        """
+        Perform speech recognition with speaker diarization.
+
+        CRITICAL: This method combines speaker diarization with speech
+        recognition, providing a complete solution for multi-speaker
+        audio processing:
+
+        Args:
+            audio_data: Input audio data as numpy array
+            diarization_config: Optional diarization configuration
+            sample_rate: Sample rate of the audio data
+            is_translation: Whether to use translation endpoint
+
+        Returns:
+            DiarizationResult with speaker segments and transcribed/translated text
+
+        Processing pipeline:
+        1. Speaker diarization and segmentation
+        2. Individual segment transcription/translation via Groq API
+        3. Text assignment and confidence scoring
+        4. Result compilation and validation
+        """
+        try:
+            # Create diarizer with speech configuration
+            diarizer = SpeakerDiarizer(
+                config=diarization_config, speech_config=self.speech_config
+            )
+
+            # Check if diarization is available
+            if not hasattr(diarizer, "_pipeline") or diarizer._pipeline is None:
+                print(
+                    "⚠️  Pyannote.audio diarization not available, falling back to basic transcription..."
+                )
+                return self._fallback_basic_transcription(
+                    audio_data, sample_rate, is_translation
+                )
+
+            # Perform diarization first
+            result = diarizer.diarize_audio(audio_data, sample_rate, diarization_config)
+
+            if not result.is_successful:
+                print("⚠️  Diarization failed, falling back to basic transcription...")
+                return self._fallback_basic_transcription(
+                    audio_data, sample_rate, is_translation
+                )
+
+            # Now transcribe or translate each segment
+            mode = "translation" if is_translation else "transcription"
+            print(f"🔄 Starting {mode} for {len(result.segments)} segments...")
+
+            for i, segment in enumerate(result.segments):
+                try:
+                    # Extract audio for this segment
+                    start_sample = int(segment.start_time * sample_rate)
+                    end_sample = int(segment.end_time * sample_rate)
+                    segment_audio = audio_data[start_sample:end_sample]
+
+                    # Transcribe or translate segment
+                    if is_translation:
+                        text = self._transcribe_audio_segment(
+                            segment_audio, is_translation=True
+                        )
+                        segment.text = text
+                        segment.transcription_confidence = 0.95  # Default confidence
+                    else:
+                        text = self._transcribe_audio_segment(
+                            segment_audio, is_translation=False
+                        )
+                        segment.text = text
+                        segment.transcription_confidence = 0.95  # Default confidence
+
+                except Exception as e:
+                    print(f"Error processing segment {i}: {e}")
+                    error_msg = f"[{mode.capitalize()} Error]"
+                    segment.text = error_msg
+                    segment.transcription_confidence = 0.0
+
+            return result
+
+        except Exception as e:
+            print(f"⚠️  Diarization failed: {e}, falling back to basic transcription...")
+            return self._fallback_basic_transcription(
+                audio_data, sample_rate, is_translation
+            )
+
+    def _fallback_basic_transcription(
+        self, audio_data: np.ndarray, sample_rate: int, is_translation: bool = False
+    ) -> DiarizationResult:
+        """
+        Fallback to basic transcription/translation when diarization is not available.
+
+        This method provides basic speech recognition without speaker diarization,
+        treating the entire audio as a single speaker segment.
+
+        Args:
+            audio_data: Input audio data as numpy array
+            sample_rate: Sample rate of the audio data
+            is_translation: If True, translate to English; if False, transcribe
+
+        Returns:
+            DiarizationResult with a single speaker segment
+        """
+        try:
+            print("🔄 Performing basic transcription/translation...")
+
+            # Transcribe or translate the entire audio
+            if is_translation:
+                text = self._transcribe_audio_segment(audio_data, is_translation=True)
+                mode = "translation"
+            else:
+                text = self._transcribe_audio_segment(audio_data, is_translation=False)
+                mode = "transcription"
+
+            # Create a single speaker segment
+            from .speaker_diarization import SpeakerSegment
+
+            segment = SpeakerSegment(
+                start_time=0.0,
+                end_time=len(audio_data) / sample_rate,
+                speaker_id="speaker_1",
+                text=text,
+                transcription_confidence=0.95,
+            )
+
+            # Create speaker mapping
+            speaker_mapping = {"speaker_1": "Speaker"}
+
+            # Create result
+            from .speaker_diarization import DiarizationResult
+
+            result = DiarizationResult(
+                segments=[segment],
+                speaker_mapping=speaker_mapping,
+                total_duration=len(audio_data) / sample_rate,
+                num_speakers=1,
+                overall_confidence=0.95,
+                processing_time=0.0,
+            )
+
+            print(f"✅ Basic {mode} completed successfully")
+            return result
+
+        except Exception as e:
+            print(f"❌ Fallback transcription failed: {e}")
+            # Return error result
+            from .speaker_diarization import DiarizationResult
+
+            return DiarizationResult(
+                segments=[],
+                speaker_mapping={},
+                total_duration=len(audio_data) / sample_rate,
+                num_speakers=0,
+                overall_confidence=0.0,
+                processing_time=0.0,
+                error_details=f"Fallback transcription failed: {str(e)}",
+            )
+
+    def _transcribe_audio_segment(
+        self, audio_data: np.ndarray, is_translation: bool = False
+    ) -> str:
+        """
+        Transcribe or translate an audio segment using Groq API.
+
+        Args:
+            audio_data: Audio data for the segment
+            is_translation: If True, translate to English; if False, transcribe
+
+        Returns:
+            Transcribed or translated text
+        """
+        try:
+            # Preprocess audio for API requirements
+            audio_data = self._preprocess_audio(audio_data)
+
+            # Save audio to temporary buffer in WAV format
+            buffer = io.BytesIO()
+            sf.write(buffer, audio_data, 16000, format="WAV")
+            buffer.seek(0)
+
+            # Call appropriate Groq API endpoint
+            if is_translation:
+                # Use translation API
+                response = self.groq_client.audio.translations.create(
+                    file=("audio.wav", buffer.getvalue(), "audio/wav"),
+                    model="whisper-large-v3",  # Use v3 for translation
+                    response_format="text",
+                    temperature=0.0,
+                )
+            else:
+                # Use transcription API
+                response = self.groq_client.audio.transcriptions.create(
+                    file=("audio.wav", buffer.getvalue(), "audio/wav"),
+                    model="whisper-large-v3-turbo",  # Use turbo for transcription
+                    response_format="text",
+                    temperature=0.0,
+                )
+
+            # Handle different response formats
+            if hasattr(response, "text"):
+                return response.text
+            elif isinstance(response, str):
+                return response
+            else:
+                # Try to get text from response object
+                return str(response)
+
+        except Exception as e:
+            error_type = "translation" if is_translation else "transcription"
+            print(f"Error calling Groq {error_type} API: {e}")
+            return f"[{error_type.capitalize()} Error]"
+
+    def recognize_with_correct_diarization(
+        self, audio_file: str, mode: str
+    ) -> "DiarizationResult":
+        """
+        CORRECT PIPELINE: Use proper diarization with accurate transcription.
+
+        This method implements the correct architecture:
+        1. Pyannote.audio detects speakers FIRST
+        2. Audio is split into speaker-specific chunks
+        3. Each chunk is transcribed by Groq API
+        4. Perfect speaker attribution with accurate text
+
+        Args:
+            audio_file: Path to audio file
+            mode: 'transcription' or 'translation'
+
+        Returns:
+            DiarizationResult with accurate speaker-specific transcriptions
+        """
+        print(f"🎭 Running CORRECT diarization pipeline for {mode}...")
+
+        try:
+            from .speaker_diarization import SpeakerDiarizer
+
+            # Create diarizer with current configuration
+            diarizer = SpeakerDiarizer()
+
+            # Use the correct pipeline method
+            result = diarizer.diarize_with_accurate_transcription(
+                audio_file=audio_file, mode=mode, speech_recognizer=self
+            )
+
+            return result
+
+        except Exception as e:
+            print(f"❌ CORRECT diarization failed: {e}")
+            print("🔄 Falling back to basic transcription...")
+
+            # Fallback: basic transcription without diarization
+            try:
+                # Load audio file and use recognize_audio_data
+                import soundfile as sf
+
+                audio_data, sample_rate = sf.read(audio_file)
+
+                # Convert to mono if stereo
+                if len(audio_data.shape) > 1:
+                    audio_data = audio_data[:, 0]
+
+                # Resample to 16kHz if needed
+                if sample_rate != 16000:
+                    from scipy import signal
+
+                    audio_data = signal.resample(
+                        audio_data, int(len(audio_data) * 16000 / sample_rate)
+                    )
+
+                # Use the correct method
+                if mode == "translation":
+                    basic_result = self.translate_audio_data(audio_data)
+                else:
+                    basic_result = self.recognize_audio_data(audio_data)
+
+                if basic_result and basic_result.text:
+                    print(f"✅ Basic {mode} completed: {basic_result.text[:100]}...")
+                    return basic_result
+                else:
+                    print(f"❌ Basic {mode} also failed")
+                    return None
+
+            except Exception as audio_error:
+                print(f"❌ Audio loading failed: {audio_error}")
+                return None

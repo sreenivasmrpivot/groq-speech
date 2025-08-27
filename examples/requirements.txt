@@ -4,3 +4,6 @@
 
 # CLI example dependencies (if any additional ones needed)
 # Currently just uses the core SDK
+
+# Real-time audio recording for continuous diarization
+pyaudio>=0.2.11

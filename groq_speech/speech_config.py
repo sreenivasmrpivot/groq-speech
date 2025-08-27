@@ -117,7 +117,7 @@ class SpeechConfig:
 
         # Network and endpoint configuration
         self.region = region or "us-east-1"
-        self.endpoint = endpoint or Config.GROQ_CUSTOM_ENDPOINT
+        self.endpoint = endpoint or Config.GROQ_API_BASE
         self.host = host
         self.authorization_token = authorization_token
 
@@ -169,9 +169,7 @@ class SpeechConfig:
             model_config["response_format"],
         )
         temp_prop = PropertyId.Speech_Recognition_Temperature
-        self.set_property(
-            temp_prop, str(model_config["temperature"])
-        )
+        self.set_property(temp_prop, str(model_config["temperature"]))
         word_timestamps_prop = PropertyId.Speech_Recognition_EnableWordLevelTimestamps
         self.set_property(
             word_timestamps_prop,

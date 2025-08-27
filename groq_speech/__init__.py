@@ -70,6 +70,7 @@ from .audio_config import AudioConfig
 from .result_reason import ResultReason, CancellationReason
 from .property_id import PropertyId
 from .config import Config, get_config
+from .speaker_diarization import DiarizationConfig, SpeakerSegment, DiarizationResult
 
 # SDK version information
 __version__ = "1.0.0"
@@ -86,4 +87,7 @@ __all__ = [
     "PropertyId",  # Configurable properties
     "Config",  # Configuration management
     "get_config",  # Configuration access function
+    "DiarizationConfig",  # Speaker diarization config
+    "SpeakerSegment",  # Individual speaker segment
+    "DiarizationResult",  # Complete diarization result
 ]

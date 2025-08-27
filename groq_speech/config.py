@@ -47,43 +47,75 @@ USAGE EXAMPLES:
 """
 
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
-# Load .env file if it exists
+# Load .env file from the groq_speech directory
 # This allows users to override default settings without code changes
-load_dotenv()
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(current_dir, ".env")
+load_dotenv(env_path)
 
 
 class Config:
-    """
-    Configuration class for Groq Speech SDK.
+    """Configuration management for the Groq Speech SDK."""
 
-    CRITICAL: This class serves as the central configuration hub for the entire
-    speech recognition system. It manages all settings, environment variables,
-    and provides validated access to configuration values:
+    # API Configuration
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    GROQ_API_BASE = os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
 
-    1. Environment Variable Loading: Automatically loads .env files
-    2. Default Value Management: Provides sensible defaults for all settings
-    3. Configuration Validation: Ensures critical values are properly set
-    4. Type Safety: Converts string environment variables to appropriate types
-    5. Modular Access: Provides categorized configuration retrieval methods
+    # HuggingFace Configuration
+    HF_TOKEN = os.getenv("HF_TOKEN", "")
 
-    The configuration system is designed to be:
-    - User-friendly: Simple .env file configuration
-    - Developer-friendly: Clear defaults and validation
-    - Production-ready: Environment-based configuration
-    - Extensible: Easy to add new configuration options
-    """
+    # Diarization Quality Settings
+    DIARIZATION_MIN_SEGMENT_DURATION = float(
+        os.getenv("DIARIZATION_MIN_SEGMENT_DURATION", "2.0")
+    )
+    DIARIZATION_SILENCE_THRESHOLD = float(
+        os.getenv("DIARIZATION_SILENCE_THRESHOLD", "0.8")
+    )
+    DIARIZATION_SPEAKER_CHANGE_SENSITIVITY = float(
+        os.getenv("DIARIZATION_SPEAKER_CHANGE_SENSITIVITY", "0.7")
+    )
+    DIARIZATION_MAX_SEGMENTS_PER_CHUNK = int(
+        os.getenv("DIARIZATION_MAX_SEGMENTS_PER_CHUNK", "8")
+    )
+
+    # Chunking Strategy
+    DIARIZATION_CHUNK_STRATEGY = os.getenv("DIARIZATION_CHUNK_STRATEGY", "adaptive")
+    DIARIZATION_MIN_CHUNK_DURATION = float(
+        os.getenv("DIARIZATION_MIN_CHUNK_DURATION", "15.0")
+    )
+    DIARIZATION_MAX_CHUNK_DURATION = float(
+        os.getenv("DIARIZATION_MAX_CHUNK_DURATION", "30.0")
+    )
+    DIARIZATION_OVERLAP_DURATION = float(
+        os.getenv("DIARIZATION_OVERLAP_DURATION", "2.0")
+    )
+
+    # Speaker Persistence
+    DIARIZATION_ENABLE_CROSS_CHUNK_PERSISTENCE = (
+        os.getenv("DIARIZATION_ENABLE_CROSS_CHUNK_PERSISTENCE", "true").lower()
+        == "true"
+    )
+    DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD = float(
+        os.getenv("DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD", "0.85")
+    )
+    DIARIZATION_MAX_SPEAKERS = int(os.getenv("DIARIZATION_MAX_SPEAKERS", "5"))
+
+    # Processing Quality
+    DIARIZATION_ENABLE_ADAPTIVE_MERGING = (
+        os.getenv("DIARIZATION_ENABLE_ADAPTIVE_MERGING", "true").lower() == "true"
+    )
+    DIARIZATION_MERGE_TIME_THRESHOLD = float(
+        os.getenv("DIARIZATION_MERGE_TIME_THRESHOLD", "1.5")
+    )
+    DIARIZATION_ENABLE_CONTEXT_AWARENESS = (
+        os.getenv("DIARIZATION_ENABLE_CONTEXT_AWARENESS", "true").lower() == "true"
+    )
 
     # Groq API Settings
     # These control the core API communication with Groq's services
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-    GROQ_API_BASE_URL = os.getenv("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1")
-    GROQ_CUSTOM_ENDPOINT = os.getenv("GROQ_CUSTOM_ENDPOINT", None)
-
-    # Model Configuration
-    # These settings control which AI model is used and how it processes audio
     GROQ_MODEL_ID = os.getenv(
         "GROQ_MODEL_ID", "whisper-large-v3"
     )  # whisper-large-v3 (supports translation) or
@@ -170,6 +202,47 @@ class Config:
         os.getenv("ENABLE_LANGUAGE_IDENTIFICATION", "true").lower() == "true"
     )
 
+    # Real-time diarization parameters
+    DIARIZATION_REALTIME_SEGMENT_DURATION = float(
+        os.getenv("DIARIZATION_REALTIME_SEGMENT_DURATION", "5.0")
+    )
+    DIARIZATION_REALTIME_CHUNK_STRATEGY = os.getenv(
+        "DIARIZATION_REALTIME_CHUNK_STRATEGY", "fixed"
+    )
+    DIARIZATION_REALTIME_CHUNK_DURATION = float(
+        os.getenv("DIARIZATION_REALTIME_CHUNK_DURATION", "5.0")
+    )
+    DIARIZATION_REALTIME_OVERLAP_DURATION = float(
+        os.getenv("DIARIZATION_REALTIME_OVERLAP_DURATION", "1.0")
+    )
+    DIARIZATION_REALTIME_MIN_SEGMENT_DURATION = float(
+        os.getenv("DIARIZATION_REALTIME_MIN_SEGMENT_DURATION", "1.0")
+    )
+    DIARIZATION_REALTIME_SILENCE_THRESHOLD = float(
+        os.getenv("DIARIZATION_REALTIME_SILENCE_THRESHOLD", "0.6")
+    )
+    DIARIZATION_REALTIME_SPEAKER_CHANGE_SENSITIVITY = float(
+        os.getenv("DIARIZATION_REALTIME_SPEAKER_CHANGE_SENSITIVITY", "0.8")
+    )
+    DIARIZATION_REALTIME_MAX_SEGMENTS_PER_CHUNK = int(
+        os.getenv("DIARIZATION_REALTIME_MAX_SEGMENTS_PER_CHUNK", "4")
+    )
+    DIARIZATION_REALTIME_ENABLE_CROSS_CHUNK_PERSISTENCE = (
+        os.getenv("DIARIZATION_REALTIME_ENABLE_CROSS_CHUNK_PERSISTENCE", "true").lower()
+        == "true"
+    )
+    DIARIZATION_REALTIME_SPEAKER_SIMILARITY_THRESHOLD = float(
+        os.getenv("DIARIZATION_REALTIME_SPEAKER_SIMILARITY_THRESHOLD", "0.8")
+    )
+    DIARIZATION_REALTIME_ENABLE_ADAPTIVE_MERGING = (
+        os.getenv("DIARIZATION_REALTIME_ENABLE_ADAPTIVE_MERGING", "false").lower()
+        == "true"
+    )
+    DIARIZATION_REALTIME_ENABLE_CONTEXT_AWARENESS = (
+        os.getenv("DIARIZATION_REALTIME_ENABLE_CONTEXT_AWARENESS", "false").lower()
+        == "true"
+    )
+
     @classmethod
     def get_device_index(cls) -> Optional[int]:
         """
@@ -241,6 +314,58 @@ class Config:
         return cls.GROQ_API_KEY
 
     @classmethod
+    def get_api_base(cls) -> str:
+        """Get the Groq API base URL."""
+        return cls.GROQ_API_BASE
+
+    @classmethod
+    def get_hf_token(cls) -> Optional[str]:
+        """
+        Get the HuggingFace token for Pyannote.audio diarization.
+
+        CRITICAL: This method provides access to the HF_TOKEN for speaker
+        diarization functionality. The token is optional but required for
+        full Pyannote.audio functionality.
+
+        Returns:
+            HF_TOKEN string if configured, empty string if not set
+
+        Note:
+        - HF_TOKEN is optional for basic transcription/translation
+        - Required for speaker diarization with Pyannote.audio
+        - Get token from https://hf.co/settings/tokens
+        - Accept model terms at https://hf.co/pyannote/speaker-diarization-3.1
+        """
+        token = cls.HF_TOKEN if cls.HF_TOKEN else ""
+
+        # Check if token is a placeholder value
+        if token in ["your_huggingface_token_here", "your_token_here", ""]:
+            return ""
+
+        return token
+
+    @classmethod
+    def validate_hf_token(cls) -> bool:
+        """
+        Validate that HF_TOKEN is properly configured.
+
+        CRITICAL: This method ensures the HF_TOKEN is set and valid
+        before attempting to use Pyannote.audio models.
+
+        Returns:
+            True if HF_TOKEN is valid, False otherwise
+
+        Validation checks:
+        - HF_TOKEN is not empty or missing
+        - HF_TOKEN is not the placeholder value
+        - HF_TOKEN format is acceptable
+        """
+        token = cls.get_hf_token()
+        return bool(
+            token and token not in ["your_huggingface_token_here", "your_token_here"]
+        )
+
+    @classmethod
     def get_model_config(cls) -> dict:
         """
         Get complete model configuration as a dictionary.
@@ -298,27 +423,87 @@ class Config:
         }
 
     @classmethod
-    def get_chunking_config(cls) -> dict:
-        """
-        Get continuous recognition chunking configuration as a dictionary.
-
-        CRITICAL: This method provides centralized access to all chunking-related
-        configuration settings. It's used by the speech recognizer to configure
-        how audio is chunked for continuous recognition.
-
-        Returns:
-            Dictionary containing all chunking configuration parameters
-
-        Configuration includes:
-        - Buffer duration (minimum 10s for Groq billing compliance)
-        - Overlap duration (prevents word loss between chunks)
-        - Chunk size for microphone reading
-        """
+    def get_diarization_config(cls) -> Dict[str, Any]:
+        """Get diarization configuration as a dictionary."""
         return {
-            "buffer_duration": cls.CONTINUOUS_BUFFER_DURATION,
-            "overlap_duration": cls.CONTINUOUS_OVERLAP_DURATION,
-            "chunk_size": cls.CONTINUOUS_CHUNK_SIZE,
+            "min_segment_duration": cls.DIARIZATION_MIN_SEGMENT_DURATION,
+            "silence_threshold": cls.DIARIZATION_SILENCE_THRESHOLD,
+            "speaker_change_sensitivity": cls.DIARIZATION_SPEAKER_CHANGE_SENSITIVITY,
+            "max_segments_per_chunk": cls.DIARIZATION_MAX_SEGMENTS_PER_CHUNK,
+            "chunk_strategy": cls.DIARIZATION_CHUNK_STRATEGY,
+            "min_chunk_duration": cls.DIARIZATION_MIN_CHUNK_DURATION,
+            "max_chunk_duration": cls.DIARIZATION_MAX_CHUNK_DURATION,
+            "overlap_duration": cls.DIARIZATION_OVERLAP_DURATION,
+            "enable_cross_chunk_persistence": cls.DIARIZATION_ENABLE_CROSS_CHUNK_PERSISTENCE,
+            "speaker_similarity_threshold": cls.DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD,
+            "max_speakers": cls.DIARIZATION_MAX_SPEAKERS,
+            "enable_adaptive_merging": cls.DIARIZATION_ENABLE_ADAPTIVE_MERGING,
+            "merge_time_threshold": cls.DIARIZATION_MERGE_TIME_THRESHOLD,
+            "enable_context_awareness": cls.DIARIZATION_ENABLE_CONTEXT_AWARENESS,
         }
+
+    @classmethod
+    def get_chunking_config(cls) -> Dict[str, Any]:
+        """Get chunking configuration for backward compatibility."""
+        return {
+            "buffer_duration": cls.DIARIZATION_MAX_CHUNK_DURATION,
+            "overlap_duration": cls.DIARIZATION_OVERLAP_DURATION,
+            "chunk_size": 4096,  # Default audio chunk size
+        }
+
+    @classmethod
+    def validate_config(cls) -> bool:
+        """Validate the configuration settings."""
+        errors = []
+
+        if not cls.GROQ_API_KEY:
+            errors.append("GROQ_API_KEY is required")
+
+        if cls.DIARIZATION_MIN_SEGMENT_DURATION < 0.5:
+            errors.append(
+                "DIARIZATION_MIN_SEGMENT_DURATION must be at least 0.5 seconds"
+            )
+
+        if (
+            cls.DIARIZATION_SILENCE_THRESHOLD < 0.1
+            or cls.DIARIZATION_SILENCE_THRESHOLD > 1.0
+        ):
+            errors.append("DIARIZATION_SILENCE_THRESHOLD must be between 0.1 and 1.0")
+
+        if (
+            cls.DIARIZATION_SPEAKER_CHANGE_SENSITIVITY < 0.1
+            or cls.DIARIZATION_SPEAKER_CHANGE_SENSITIVITY > 1.0
+        ):
+            errors.append(
+                "DIARIZATION_SPEAKER_CHANGE_SENSITIVITY must be between 0.1 and 1.0"
+            )
+
+        if cls.DIARIZATION_MIN_CHUNK_DURATION < 5.0:
+            errors.append("DIARIZATION_MIN_CHUNK_DURATION must be at least 5.0 seconds")
+
+        if cls.DIARIZATION_MAX_CHUNK_DURATION < cls.DIARIZATION_MIN_CHUNK_DURATION:
+            errors.append(
+                "DIARIZATION_MAX_CHUNK_DURATION must be greater than DIARIZATION_MIN_CHUNK_DURATION"
+            )
+
+        if (
+            cls.DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD < 0.5
+            or cls.DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD > 1.0
+        ):
+            errors.append(
+                "DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD must be between 0.5 and 1.0"
+            )
+
+        if cls.DIARIZATION_MAX_SPEAKERS < 1 or cls.DIARIZATION_MAX_SPEAKERS > 10:
+            errors.append("DIARIZATION_MAX_SPEAKERS must be between 1 and 10")
+
+        if errors:
+            print("Configuration validation errors:")
+            for error in errors:
+                print(f"  ❌ {error}")
+            return False
+
+        return True
 
 
 # Convenience function to get config
