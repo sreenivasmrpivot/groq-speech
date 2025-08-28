@@ -72,6 +72,7 @@ from .result_reason import ResultReason, CancellationReason
 from .config import Config
 from .property_id import PropertyId
 from .speaker_diarization import SpeakerDiarizer, DiarizationConfig, DiarizationResult
+from .enhanced_diarization import EnhancedDiarizer, EnhancedDiarizationConfig
 
 
 class TimingMetrics:
@@ -1428,3 +1429,68 @@ class SpeechRecognizer:
             except Exception as audio_error:
                 print(f"❌ Audio loading failed: {audio_error}")
                 return None
+
+    def recognize_with_enhanced_diarization(
+        self,
+        audio_file: str,
+        mode: str,
+        enhanced_config: Optional[EnhancedDiarizationConfig] = None,
+    ) -> DiarizationResult:
+        """
+        Perform enhanced diarization with smart segment grouping and parallel processing.
+
+        This method implements the advanced dataflow:
+        1. Pyannote.audio → Speaker detection (51 segments)
+        2. Smart segment grouping → Combine segments under 25MB limit
+        3. Parallel Groq API processing → Process groups concurrently
+        4. Ordered output → Maintain segment order and speaker mapping
+
+        Args:
+            audio_file: Path to audio file
+            mode: 'transcription' or 'translation'
+            enhanced_config: Optional enhanced diarization configuration
+
+        Returns:
+            DiarizationResult with enhanced processing and parallel optimization
+        """
+        try:
+            # Create enhanced diarizer
+            enhanced_diarizer = EnhancedDiarizer(
+                config=enhanced_config, speech_config=self.speech_config
+            )
+
+            # Execute enhanced diarization flow
+            result = enhanced_diarizer.diarize_with_enhanced_flow(
+                audio_file, mode, self
+            )
+
+            # Get performance statistics
+            stats = enhanced_diarizer.get_performance_stats()
+
+            print(f"\n🚀 Enhanced Diarization Performance Summary:")
+            print(f"   Total processing time: {stats['total_processing_time']:.2f}s")
+            print(f"   Speaker detection: {stats['diarization_time']:.2f}s")
+            print(f"   Smart grouping: {stats['grouping_time']:.2f}s")
+            print(f"   Parallel API processing: {stats['api_processing_time']:.2f}s")
+            print(
+                f"   Segments: {stats['total_segments']} → Groups: {stats['total_groups']}"
+            )
+            
+            # Show Pyannote.audio cache statistics
+            try:
+                from .pyannote_cache import print_pipeline_cache_stats
+                print_pipeline_cache_stats()
+            except ImportError:
+                pass
+
+            return result
+
+        except Exception as e:
+            print(f"❌ Enhanced diarization failed: {e}")
+            print("🔄 Falling back to basic diarization...")
+            return self.recognize_with_diarization(
+                np.array([]),  # Empty audio data for fallback
+                diarization_config=None,
+                sample_rate=16000,
+                is_translation=(mode == "translation"),
+            )

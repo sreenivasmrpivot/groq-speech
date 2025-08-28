@@ -864,14 +864,22 @@ class SpeakerDiarizer:
                 self._pipeline = None
                 return
 
-            print("🔑 HF_TOKEN configured, attempting to download Pyannote models...")
+            print("🔑 HF_TOKEN configured, attempting to load Pyannote models...")
 
-            # Initialize pipeline with default model
+            # Use global cache to avoid repeated model loading
             try:
-                self._pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization-3.1", use_auth_token=hf_token
+                from .pyannote_cache import get_cached_pipeline
+                
+                self._pipeline = get_cached_pipeline(
+                    "pyannote/speaker-diarization-3.1", 
+                    use_auth_token=hf_token
                 )
-                print("✅ Pyannote models downloaded successfully!")
+                
+                if self._pipeline:
+                    print("✅ Pyannote models loaded from cache or downloaded!")
+                else:
+                    print("❌ Failed to load Pyannote models")
+                    return
 
                 # Configure pipeline parameters (if supported)
                 if hasattr(self._pipeline, "instantiate"):

@@ -114,6 +114,28 @@ class Config:
         os.getenv("DIARIZATION_ENABLE_CONTEXT_AWARENESS", "true").lower() == "true"
     )
 
+    # Enhanced Diarization Dataflow Settings
+    DIARIZATION_MAX_FILE_SIZE_MB = float(
+        os.getenv("DIARIZATION_MAX_FILE_SIZE_MB", "25.0")
+    )
+    DIARIZATION_ENABLE_PARALLEL_PROCESSING = (
+        os.getenv("DIARIZATION_ENABLE_PARALLEL_PROCESSING", "true").lower() == "true"
+    )
+    DIARIZATION_MAX_PARALLEL_REQUESTS = int(
+        os.getenv("DIARIZATION_MAX_PARALLEL_REQUESTS", "8")
+    )
+    DIARIZATION_RETRY_ENABLED = (
+        os.getenv("DIARIZATION_RETRY_ENABLED", "true").lower() == "true"
+    )
+    DIARIZATION_RETRY_DELAY_SECONDS = float(
+        os.getenv("DIARIZATION_RETRY_DELAY_SECONDS", "1.0")
+    )
+    DIARIZATION_MAX_RETRIES = int(os.getenv("DIARIZATION_MAX_RETRIES", "3"))
+    DIARIZATION_LOG_LEVEL = os.getenv("DIARIZATION_LOG_LEVEL", "INFO")
+    DIARIZATION_ENABLE_PROGRESS_REPORTING = (
+        os.getenv("DIARIZATION_ENABLE_PROGRESS_REPORTING", "true").lower() == "true"
+    )
+
     # Groq API Settings
     # These control the core API communication with Groq's services
     GROQ_MODEL_ID = os.getenv(
