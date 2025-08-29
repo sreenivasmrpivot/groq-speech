@@ -9,8 +9,8 @@ This demo implements the CORRECT pipeline:
 4. Perfect speaker attribution with accurate text
 
 Usage:
-    python speech_demo.py --file audio.wav --mode transcription
-    python speech_demo.py --microphone --mode transcription
+    python speech_demo.py --file audio.wav --operation transcription
+    python speech_demo.py --microphone-mode single --operation transcription
     python speech_demo.py --help
 """
 
@@ -19,6 +19,7 @@ import sys
 import os
 from pathlib import Path
 import time
+
 
 # Add the parent directory to the path to import groq_speech
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -52,11 +53,13 @@ def validate_environment():
     if not hf_token or hf_token == "your_hf_token_here":
         print("⚠️  HF_TOKEN not configured - Limited diarization capability")
         print("💡 For full speaker diarization, configure HF_TOKEN:")
-        print("   1. Get token from: https://huggingface.co/settings/tokens")
+        print("   1. Get token from: " "https://huggingface.co/settings/tokens")
         print(
-            "   2. Accept license: https://huggingface.co/pyannote/speaker-diarization-3.1"
+            "   2. Accept license: "
+            "https://huggingface.co/pyannote/"
+            "speaker-diarization-3.1"
         )
-        print("   3. Update groq_speech/.env with: HF_TOKEN=your_actual_token_here")
+        print("   3. Update groq_speech/.env with: " "HF_TOKEN=your_actual_token_here")
     else:
         print("✅ HF_TOKEN configured - Full Pyannote.audio diarization enabled")
 
@@ -111,7 +114,9 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer)
                 )
 
                 print(f"\n🎤 {speaker}:")
-                print(f"   {i+1}. {start_t:8.2f}s - {end_t:8.2f}s ({duration:5.2f}s)")
+                print(
+                    f"   {i+1}. {start_t:8.2f}s - {end_t:8.2f}s " f"({duration:5.2f}s)"
+                )
                 print(f"      {text}")
                 print(f"      Confidence: {confidence:.3f}")
 
@@ -376,11 +381,111 @@ def process_microphone(mode: str, recognizer: SpeechRecognizer):
         return None
 
 
-def process_microphone_basic(mode: str, recognizer: SpeechRecognizer):
-    """Fallback: Basic microphone transcription without diarization."""
-    print(f"\n🎤 Basic Microphone {mode.title()} (No Diarization)")
+def process_microphone_single(mode: str, recognizer: SpeechRecognizer):
+    """Single-shot microphone transcription without diarization."""
+    print(f"\n🎤 Single Microphone {mode.title()} (No Diarization)")
     print("=" * 50)
-    print("💡 Basic transcription mode - no speaker detection")
+    print("💡 Single-shot transcription mode - record once, process, show result")
+    print("💡 Press Ctrl+C to stop recording and process audio")
+
+    try:
+        import pyaudio
+        import numpy as np
+        import soundfile as sf
+        import tempfile
+
+        # Audio recording parameters
+        CHUNK = 1024
+        FORMAT = pyaudio.paFloat32
+        CHANNELS = 1
+        RATE = 16000
+
+        print("🎤 Recording started - speak naturally...")
+        print("💡 Press Ctrl+C when you want to stop recording and process the audio")
+
+        p = pyaudio.PyAudio()
+        stream = p.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            frames_per_buffer=CHUNK,
+        )
+
+        frames = []
+        print("🎤 Recording... Press Ctrl+C to stop")
+
+        try:
+            # Record continuously until user interrupts
+            while True:
+                data = stream.read(CHUNK)
+                frames.append(data)
+
+        except KeyboardInterrupt:
+            print("\n🛑 Recording stopped by user, processing audio...")
+            
+            # Convert to numpy array
+            audio_data = np.frombuffer(b"".join(frames), dtype=np.float32)
+
+            # Save to temporary file for processing
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_path = temp_file.name
+                sf.write(temp_path, audio_data, RATE)
+
+            try:
+                # Process the recorded audio
+                if mode == "translation":
+                    result = recognizer.translate_audio_data(audio_data)
+                else:
+                    result = recognizer.recognize_audio_data(audio_data)
+
+                # Clean up temporary file
+                os.unlink(temp_path)
+
+                if result and result.text:
+                    print(f"✅ {mode.title()} completed successfully!")
+                    return result
+                else:
+                    print(f"❌ {mode.title()} failed - no text detected")
+                    return None
+
+            except Exception as e:
+                print(f"❌ Audio processing failed: {e}")
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                return None
+
+            finally:
+                stream.stop_stream()
+                stream.close()
+                p.terminate()
+
+        except Exception as e:
+            print(f"❌ Recording failed: {e}")
+            try:
+                stream.stop_stream()
+                stream.close()
+                p.terminate()
+            except:
+                pass
+            return None
+
+    except ImportError:
+        print("❌ PyAudio not available. Install with: pip install pyaudio")
+        return None
+    except Exception as e:
+        print(f"❌ Single microphone processing failed: {e}")
+        return None
+
+
+def process_microphone_basic(mode: str, recognizer: SpeechRecognizer):
+    """Continuous microphone transcription without diarization."""
+    print(f"\n🎤 Continuous Microphone {mode.title()} (No Diarization)")
+    print("=" * 50)
+    print("💡 Continuous transcription mode - real-time streaming results")
     print("💡 Press Ctrl+C to stop")
 
     try:
@@ -409,8 +514,20 @@ def process_microphone_basic(mode: str, recognizer: SpeechRecognizer):
     except KeyboardInterrupt:
         print("\n🛑 Stopping basic recognition...")
         recognizer.stop_continuous_recognition()
+
+        # Return a proper result object to indicate successful completion
+        class BasicResult:
+            def __init__(self):
+                self.text = "[Continuous recognition stopped by user]"
+                self.segments = []
+                self.num_speakers = 0
+                self.total_duration = 0.0
+                self.overall_confidence = 0.0
+
+        return BasicResult()
     except Exception as e:
         print(f"❌ Basic microphone processing failed: {e}")
+        return None
 
 
 def process_microphone_enhanced(mode: str, recognizer: SpeechRecognizer):
@@ -556,45 +673,66 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 EXAMPLES:
-    # Enhanced diarization with smart grouping and parallel processing
-    python speech_demo.py --file audio.wav --mode transcription --enhanced
+    # File-based transcription (default operation, enhanced diarization)
+    python speech_demo.py --file audio.wav
     
-    # Basic diarization (legacy)
-    python speech_demo.py --file audio.wav --mode transcription
+    # File-based translation (enhanced diarization)
+    python speech_demo.py --file audio.wav --operation translation
     
-    # Microphone input with enhanced diarization
-    python speech_demo.py --microphone --mode transcription --enhanced
+    # Microphone transcription (default operation, no diarization)
+    python speech_demo.py --microphone-mode single
     
-    # Translation mode with enhanced processing
-    python speech_demo.py --file audio.wav --mode translation --enhanced
+    # Microphone translation (no diarization)
+    python speech_demo.py --microphone-mode single --operation translation
+    
+    # Microphone with enhanced diarization
+    python speech_demo.py --microphone-mode single --diarize true
+    
+    # Microphone continuous with enhanced diarization and translation
+    python speech_demo.py --microphone-mode continuous --operation translation --diarize true
+    
+    # File with enhanced diarization (always enabled for files)
+    python speech_demo.py --file audio.wav --diarize true
         """,
     )
 
-    parser.add_argument("--file", type=str, help="Audio file to process")
     parser.add_argument(
-        "--microphone", action="store_true", help="Use microphone input instead of file"
-    )
-    parser.add_argument(
-        "--mode",
-        type=str,
+        "--operation",
         choices=["transcription", "translation"],
         default="transcription",
-        help="Processing mode: transcription or translation",
+        help="Operation: transcription (speech-to-text) or translation "
+        "(speech-to-text in target language). Defaults to transcription.",
     )
+
     parser.add_argument(
-        "--enhanced",
-        action="store_true",
-        help="Use enhanced diarization with smart grouping and parallel processing",
+        "--microphone-mode",
+        choices=["single", "continuous"],
+        help="Microphone mode: single (record once, process, show result) "
+        "or continuous (real-time streaming results)",
+    )
+
+    parser.add_argument(
+        "--file",
+        type=str,
+        help="Audio file path for recognition",
+    )
+
+    parser.add_argument(
+        "--diarize",
+        default=False,
+        type=bool,
+        help="Enable enhanced speaker diarization with smart grouping and "
+        "parallel processing. Defaults to False.",
     )
 
     args = parser.parse_args()
 
     # Validate arguments
-    if not args.file and not args.microphone:
-        parser.error("Either --file or --microphone must be specified")
+    if not args.file and not args.microphone_mode:
+        parser.error("Either --file or --microphone-mode must be specified")
 
-    if args.file and args.microphone:
-        parser.error("Cannot specify both --file and --microphone")
+    if args.file and args.microphone_mode:
+        parser.error("Cannot specify both --file and --microphone-mode")
 
     # Validate environment
     if not validate_environment():
@@ -612,19 +750,24 @@ EXAMPLES:
     # Process based on arguments
     try:
         if args.file:
-            if args.enhanced:
-                result = process_audio_file_enhanced(args.file, args.mode, recognizer)
-            else:
-                result = process_audio_file(args.file, args.mode, recognizer)
+            # For file processing, use enhanced diarization by default
+            # (better performance)
+            result = process_audio_file_enhanced(args.file, args.operation, recognizer)
         else:  # microphone
-            if args.enhanced:
-                result = process_microphone_enhanced(args.mode, recognizer)
+            if args.diarize:
+                # Use enhanced diarization for microphone when explicitly
+                # requested (better performance with smart grouping)
+                result = process_microphone_enhanced(args.operation, recognizer)
             else:
-                result = process_microphone(args.mode, recognizer)
+                # Use basic microphone processing (no diarization) by default
+                if args.microphone_mode == "single":
+                    result = process_microphone_single(args.operation, recognizer)
+                else:  # continuous
+                    result = process_microphone_basic(args.operation, recognizer)
 
         if result:
             print(f"\n✅ Processing completed successfully!")
-            print(f"🎯 Mode: {args.mode}")
+            print(f"🎯 Operation: {args.operation}")
             if hasattr(result, "segments"):
                 print(f"🎭 Speakers: {result.num_speakers}")
                 print(f"📊 Segments: {len(result.segments)}")
