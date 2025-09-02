@@ -423,7 +423,7 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer):
 
         except KeyboardInterrupt:
             print("\n🛑 Recording stopped by user, processing audio...")
-            
+
             # Convert to numpy array
             audio_data = np.frombuffer(b"".join(frames), dtype=np.float32)
 
@@ -532,13 +532,13 @@ def process_microphone_basic(mode: str, recognizer: SpeechRecognizer):
 
 def process_microphone_enhanced(mode: str, recognizer: SpeechRecognizer):
     """
-    Process microphone input with ENHANCED diarization dataflow.
+    Process microphone input with ENHANCED diarization dataflow (single-shot).
 
     For microphone input, we use longer segments (15-30 seconds) to allow
     Pyannote.audio to properly detect speaker patterns, then apply the
     enhanced grouping and parallel processing.
     """
-    print(f"\n🎤 Microphone Input with ENHANCED Diarization")
+    print(f"\n🎤 Microphone Input with ENHANCED Diarization (Single-shot)")
     print("=" * 60)
     print("🚀 ENHANCED Pipeline: Smart grouping + Parallel processing")
     print("💡 Recording in 30-second segments for optimal diarization")
@@ -582,7 +582,14 @@ def process_microphone_enhanced(mode: str, recognizer: SpeechRecognizer):
         print("🎤 Recording started... Press Ctrl+C to stop")
 
         try:
-            while True:
+            segment_count = 0
+
+            while True:  # Continuous loop for continuous mode
+                segment_count += 1
+                print(
+                    f"\n🔄 Recording segment {segment_count} ({SEGMENT_DURATION}s)..."
+                )
+
                 # Record segment
                 frames = []
                 for _ in range(0, int(RATE / CHUNK * SEGMENT_DURATION)):
@@ -601,17 +608,17 @@ def process_microphone_enhanced(mode: str, recognizer: SpeechRecognizer):
 
                 try:
                     print(
-                        f"\n🔄 Processing {SEGMENT_DURATION}s segment with enhanced diarization..."
+                        f"🔄 Processing segment {segment_count} with enhanced diarization..."
                     )
 
-                    # Create enhanced configuration for microphone
+                    # Create enhanced configuration for microphone - match file mode settings
                     enhanced_config = EnhancedDiarizationConfig(
-                        max_file_size_mb=25.0,
+                        max_file_size_mb=25.0,  # Match file mode limit
                         enable_parallel_processing=True,
-                        max_parallel_requests=2,  # Lower for microphone
+                        max_parallel_requests=4,  # Match file mode concurrency
                         retry_enabled=True,
-                        retry_delay_seconds=0.5,  # Faster for real-time
-                        max_retries=2,
+                        retry_delay_seconds=1.0,  # Match file mode timing
+                        max_retries=3,  # Match file mode retries
                         log_level="INFO",
                         enable_progress_reporting=True,
                     )
@@ -622,24 +629,30 @@ def process_microphone_enhanced(mode: str, recognizer: SpeechRecognizer):
                     )
 
                     if result and result.segments:
-                        print(f"✅ Enhanced diarization completed!")
+                        print(
+                            f"✅ Enhanced diarization completed for segment {segment_count}!"
+                        )
                         print(f"🎭 Speakers: {result.num_speakers}")
                         print(f"📊 Segments: {len(result.segments)}")
+                        print(f"⏱️  Total duration: {result.total_duration:.1f}s")
+                        print(f"🎯 Overall confidence: {result.overall_confidence:.3f}")
 
-                        # Display results
-                        for segment in result.segments:
-                            speaker = segment.speaker_id
-                            text = (
-                                segment.text
-                                if hasattr(segment, "text")
-                                else "[No text]"
-                            )
-                            print(f"🎤 {speaker}: {text}")
+                        # Display results in the same format as file mode - use the grouped results from logs
+                        # The enhanced diarization already provides grouped results in the logs
+                        # We don't need to display individual segments - the logs show the grouped results
+                        # This matches the file mode behavior (which has display commented out)
+
+                        # Note: The grouped results are already displayed in the enhanced diarization logs
+                        # Lines like "🎭 Speaker 01: 📝 [grouped text]" show the correct grouped results
+                        # Individual segments are for internal processing, not display
+
                     else:
-                        print("⚠️  Enhanced diarization failed for this segment")
+                        print(
+                            f"⚠️  Enhanced diarization failed for segment {segment_count}"
+                        )
 
                 except Exception as e:
-                    print(f"❌ Segment processing failed: {e}")
+                    print(f"❌ Segment {segment_count} processing failed: {e}")
 
                 finally:
                     # Clean up temporary file
@@ -648,12 +661,175 @@ def process_microphone_enhanced(mode: str, recognizer: SpeechRecognizer):
                     except:
                         pass
 
-                print(f"\n🎤 Recording next {SEGMENT_DURATION}s segment...")
+                # Continue to next segment
+                print(f"🎤 Recording next segment... (Press Ctrl+C to stop)")
+
+        except KeyboardInterrupt:
+            print("\n🛑 Recording stopped by user")
+            return None
+
+        finally:
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+
+    except ImportError:
+        print("❌ PyAudio not available. Install with: pip install pyaudio")
+        return None
+    except Exception as e:
+        print(f"❌ Enhanced microphone processing failed: {e}")
+        return None
+
+
+def process_microphone_enhanced_continuous(mode: str, recognizer: SpeechRecognizer):
+    """
+    Process microphone input with ENHANCED diarization dataflow (continuous).
+
+    For continuous microphone input, we record and process multiple 30-second segments
+    until the user stops with Ctrl+C. Each segment is processed with enhanced diarization.
+    """
+    print(f"\n🎤 Microphone Input with ENHANCED Diarization (Continuous)")
+    print("=" * 60)
+    print("🚀 ENHANCED Pipeline: Smart grouping + Parallel processing")
+    print("💡 Recording in 30-second segments for optimal diarization")
+    print("💡 Press Ctrl+C to stop")
+
+    # Check HF_TOKEN configuration
+    hf_token = Config.HF_TOKEN
+    if not hf_token or hf_token == "your_hf_token_here":
+        print("\n⚠️  HF_TOKEN not configured - Cannot perform enhanced diarization")
+        print("💡 For enhanced microphone diarization, configure HF_TOKEN first")
+        print("🔄 Falling back to basic transcription...")
+        return process_microphone_basic(mode, recognizer)
+
+    try:
+        import pyaudio
+        import numpy as np
+        import soundfile as sf
+        import tempfile
+
+        # Use 30-second segments for proper speaker detection
+        SEGMENT_DURATION = 30.0
+
+        print(f"🎤 Recording audio in {SEGMENT_DURATION}s segments...")
+        print("💡 Speak naturally - longer segments enable better speaker detection")
+
+        # Audio recording parameters
+        CHUNK = 1024
+        FORMAT = pyaudio.paFloat32
+        CHANNELS = 1
+        RATE = 16000
+
+        p = pyaudio.PyAudio()
+        stream = p.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            frames_per_buffer=CHUNK,
+        )
+
+        print("🎤 Recording started... Press Ctrl+C to stop")
+
+        segment_count = 0
+
+        try:
+            while True:  # Continuous loop for continuous mode
+                segment_count += 1
+                print(
+                    f"\n🔄 Recording segment {segment_count} ({SEGMENT_DURATION}s)..."
+                )
+
+                # Record segment
+                frames = []
+                for _ in range(0, int(RATE / CHUNK * SEGMENT_DURATION)):
+                    data = stream.read(CHUNK)
+                    frames.append(data)
+
+                # Convert to numpy array
+                audio_data = np.frombuffer(b"".join(frames), dtype=np.float32)
+
+                # Save temporary file for enhanced diarization
+                with tempfile.NamedTemporaryFile(
+                    suffix=".wav", delete=False
+                ) as temp_file:
+                    temp_path = temp_file.name
+                    sf.write(temp_path, audio_data, RATE)
+
+                try:
+                    print(
+                        f"🔄 Processing segment {segment_count} with enhanced diarization..."
+                    )
+
+                    # Create enhanced configuration for microphone - match file mode settings
+                    enhanced_config = EnhancedDiarizationConfig(
+                        max_file_size_mb=25.0,  # Match file mode limit
+                        enable_parallel_processing=True,
+                        max_parallel_requests=4,  # Match file mode concurrency
+                        retry_enabled=True,
+                        retry_delay_seconds=1.0,  # Match file mode timing
+                        max_retries=3,  # Match file mode retries
+                        log_level="INFO",
+                        enable_progress_reporting=True,
+                    )
+
+                    # Process with enhanced diarization
+                    result = recognizer.recognize_with_enhanced_diarization(
+                        temp_path, mode, enhanced_config
+                    )
+
+                    if result and result.segments:
+                        print(
+                            f"✅ Enhanced diarization completed for segment {segment_count}!"
+                        )
+                        print(f"🎭 Speakers: {result.num_speakers}")
+                        print(f"📊 Segments: {len(result.segments)}")
+                        print(f"⏱️  Total duration: {result.total_duration:.1f}s")
+                        print(f"🎯 Overall confidence: {result.overall_confidence:.3f}")
+
+                        # Display results in the same format as file mode - use the grouped results from logs
+                        # The enhanced diarization already provides grouped results in the logs
+                        # We don't need to display individual segments - the logs show the grouped results
+                        # This matches the file mode behavior (which has display commented out)
+
+                        # Note: The grouped results are already displayed in the enhanced diarization logs
+                        # Lines like "🎭 Speaker 01: 📝 [grouped text]" show the correct grouped results
+                        # Individual segments are for internal processing, not display
+
+                    else:
+                        print(
+                            f"⚠️  Enhanced diarization failed for segment {segment_count}"
+                        )
+
+                except Exception as e:
+                    print(f"❌ Segment {segment_count} processing failed: {e}")
+
+                finally:
+                    # Clean up temporary file
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+
+                # Continue to next segment
+                print(f"🎤 Recording next segment... (Press Ctrl+C to stop)")
 
         except KeyboardInterrupt:
             print("\n🛑 Recording stopped by user")
 
+            # Return a proper result object to indicate successful completion
+            class ContinuousResult:
+                def __init__(self):
+                    self.text = "[Continuous enhanced diarization stopped by user]"
+                    self.segments = []
+                    self.num_speakers = 0
+                    self.total_duration = 0.0
+                    self.overall_confidence = 0.0
+
+            return ContinuousResult()
+
         finally:
+            # Only clean up stream when the entire function exits
             stream.stop_stream()
             stream.close()
             p.terminate()
@@ -757,7 +933,12 @@ EXAMPLES:
             if args.diarize:
                 # Use enhanced diarization for microphone when explicitly
                 # requested (better performance with smart grouping)
-                result = process_microphone_enhanced(args.operation, recognizer)
+                if args.microphone_mode == "single":
+                    result = process_microphone_enhanced(args.operation, recognizer)
+                else:  # continuous
+                    result = process_microphone_enhanced_continuous(
+                        args.operation, recognizer
+                    )
             else:
                 # Use basic microphone processing (no diarization) by default
                 if args.microphone_mode == "single":

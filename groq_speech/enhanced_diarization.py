@@ -514,8 +514,7 @@ class EnhancedDiarizer:
         for group in sorted_groups:
             if group.group_id in group_to_result:
                 result = group_to_result[group.group_id]
-                group_num = group.group_id.split("_")[1]
-                self.logger.info(f"   🎭 Speaker {group_num}")
+                self.logger.info(f"   🎭 Speaker {group.speaker_id}")
                 self.logger.info(f"   📝 {result.text}")
                 self.logger.info("")
 
