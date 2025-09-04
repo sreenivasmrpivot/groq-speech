@@ -2,119 +2,142 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug Demo Script",
-            "type": "debugpy",
+            "name": "Debug Speech Demo - File Basic",
+            "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/demo.py",
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "args": [],
-            "justMyCode": false,
-            "stopOnEntry": false
-        },
-        {
-            "name": "Debug Basic Recognition Example",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/examples/basic_recognition.py",
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "args": [],
-            "justMyCode": false,
-            "stopOnEntry": false
-        },
-        {
-            "name": "Debug Continuous Recognition Example",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/examples/continuous_recognition.py",
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "args": [],
-            "justMyCode": false,
-            "stopOnEntry": false
-        },
-        {
-            "name": "Debug Tests",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "pytest",
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
+            "program": "${workspaceFolder}/examples/speech_demo.py",
             "args": [
-                "tests/",
-                "-v",
-                "--tb=short"
+                "--file", 
+                "test1.wav", 
+                "--diarize", 
+                "false"
             ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/examples",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
             "justMyCode": false,
             "stopOnEntry": false
         },
         {
-            "name": "Debug Single Test File",
-            "type": "debugpy",
+            "name": "Debug Speech Demo - File Enhanced",
+            "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/tests/test_basic_functionality.py",
+            "program": "${workspaceFolder}/examples/speech_demo.py",
+            "args": [
+                "--file", 
+                "test1.wav", 
+                "--diarize", 
+                "true"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/examples",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Debug Speech Demo - File Default",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/speech_demo.py",
+            "args": [
+                "--file", 
+                "test1.wav"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/examples",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Debug Speech Demo - Microphone Single",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/speech_demo.py",
+            "args": [
+                "--microphone-mode", 
+                "single"
+            ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             },
-            "args": [],
             "justMyCode": false,
             "stopOnEntry": false
         },
         {
-            "name": "Debug SDK Module",
-            "type": "debugpy",
+            "name": "Debug Speech Demo - Microphone Continuous",
+            "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/debug_sdk.py",
+            "program": "${workspaceFolder}/examples/speech_demo.py",
+            "args": [
+                "--microphone-mode", 
+                "continuous"
+            ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             },
-            "args": [],
             "justMyCode": false,
             "stopOnEntry": false
         },
         {
-            "name": "Debug with Custom API Key",
-            "type": "debugpy",
+            "name": "Debug Speech Demo - Microphone Single Diarize",
+            "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/demo.py",
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}",
-                "GROQ_API_KEY": "${env:GROQ_API_KEY}"
-            },
-            "args": [],
-            "justMyCode": false,
-            "stopOnEntry": false
-        },
-        {
-            "name": "Debug SDK Installation",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/test_installation.py",
+            "program": "${workspaceFolder}/examples/speech_demo.py",
+            "args": [
+                "--microphone-mode", 
+                "single",
+                "--diarize",
+                "true"
+            ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             },
-            "args": [],
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Debug Speech Demo - Translation",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/speech_demo.py",
+            "args": [
+                "--microphone-mode", 
+                "continuous",
+                "--operation",
+                "translation"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Debug Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
             "justMyCode": false,
             "stopOnEntry": false
         }
