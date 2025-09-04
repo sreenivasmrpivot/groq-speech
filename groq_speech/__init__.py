@@ -66,11 +66,10 @@ USAGE EXAMPLES:
 
 from .speech_config import SpeechConfig
 from .speech_recognizer import SpeechRecognizer, SpeechRecognitionResult
-from .audio_config import AudioConfig
 from .result_reason import ResultReason, CancellationReason
 from .property_id import PropertyId
 from .config import Config, get_config
-from .speaker_diarization import DiarizationConfig, SpeakerSegment, DiarizationResult
+from .speaker_diarization import DiarizationConfig, SpeakerSegment, DiarizationResult, Diarizer
 
 # SDK version information
 __version__ = "1.0.0"
@@ -81,7 +80,6 @@ __all__ = [
     "SpeechConfig",  # Speech recognition configuration
     "SpeechRecognizer",  # Main speech recognition engine
     "SpeechRecognitionResult",  # Recognition result objects
-    "AudioConfig",  # Audio input/output configuration
     "ResultReason",  # Recognition result status
     "CancellationReason",  # Error categorization
     "PropertyId",  # Configurable properties
@@ -90,4 +88,5 @@ __all__ = [
     "DiarizationConfig",  # Speaker diarization config
     "SpeakerSegment",  # Individual speaker segment
     "DiarizationResult",  # Complete diarization result
+    "Diarizer",  # Simplified diarizer (replaces SpeakerDiarizer and EnhancedDiarizer)
 ]

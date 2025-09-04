@@ -65,21 +65,35 @@ import numpy as np
 import soundfile as sf
 import torch
 
-try:
-    from pyannote.audio import Pipeline
-    from pyannote.core.annotation import Annotation
+# Lazy import Pyannote to avoid loading it when not needed
+PYANNOTE_AVAILABLE = None
+Pipeline = None
+Annotation = None
 
-    PYANNOTE_AVAILABLE = True
-except ImportError:
-    PYANNOTE_AVAILABLE = False
-    print(
-        "Warning: Pyannote.audio not available. Install with: pip install pyannote.audio"
-    )
-
-    # Create a fallback Annotation class for when Pyannote is not available
-    class Annotation:
-        def itertracks(self, yield_label=False):
-            return []
+def _import_pyannote():
+    """Lazy import Pyannote.audio only when needed."""
+    global PYANNOTE_AVAILABLE, Pipeline, Annotation
+    
+    if PYANNOTE_AVAILABLE is not None:
+        return PYANNOTE_AVAILABLE
+    
+    try:
+        from pyannote.audio import Pipeline
+        from pyannote.core.annotation import Annotation
+        PYANNOTE_AVAILABLE = True
+        return True
+    except ImportError:
+        PYANNOTE_AVAILABLE = False
+        print(
+            "Warning: Pyannote.audio not available. Install with: pip install pyannote.audio"
+        )
+        
+        # Create a fallback Annotation class for when Pyannote is not available
+        class Annotation:
+            def itertracks(self, yield_label=False):
+                return []
+        
+        return False
 
 
 from .speech_config import SpeechConfig
@@ -765,6 +779,7 @@ class GlobalSpeakerTracker:
         return f"GlobalSpeakerTracker(speakers={len(self.speaker_embeddings)}, threshold={self.similarity_threshold})"
 
 
+# TO BE DELETED - Internal implementation, not a public entry point
 class SpeakerDiarizer:
     """
     Main class for speaker diarization operations.
@@ -836,7 +851,7 @@ class SpeakerDiarizer:
 
     def _initialize_pipeline(self):
         """Initialize Pyannote diarization pipeline."""
-        if not PYANNOTE_AVAILABLE:
+        if not _import_pyannote():
             print(
                 "Warning: Pyannote.audio is not available. Install with: pip install pyannote.audio"
             )
@@ -2589,3 +2604,57 @@ class SpeakerDiarizer:
         except Exception as e:
             print(f"      ❌ Audio chunk extraction failed: {e}")
             return None
+
+
+# Simplified Diarizer class that combines both basic and enhanced functionality
+class Diarizer:
+    """Simplified diarizer that provides enhanced functionality by default."""
+    
+    def __init__(self, config: Optional[DiarizationConfig] = None):
+        self.config = config or DiarizationConfig()
+        self.base_diarizer = SpeakerDiarizer(config)
+        
+    def diarize(self, audio_file: str, mode: str, speech_recognizer=None) -> DiarizationResult:
+        """
+        Perform diarization with enhanced functionality by default.
+        
+        Args:
+            audio_file: Path to audio file
+            mode: 'transcription' or 'translation'
+            speech_recognizer: SpeechRecognizer instance for transcription
+            
+        Returns:
+            DiarizationResult with speaker-separated transcription
+        """
+        try:
+            # Use the enhanced diarization method from SpeakerDiarizer
+            return self.base_diarizer.diarize_with_accurate_transcription(
+                audio_file, mode, speech_recognizer
+            )
+        except Exception as e:
+            print(f"Diarization failed: {e}")
+            # Fallback to basic diarization - fix the method call
+            try:
+                import soundfile as sf
+                audio_data, sample_rate = sf.read(audio_file)
+                return self.base_diarizer.diarize_audio(
+                    audio_data, sample_rate
+                )
+            except Exception as e2:
+                print(f"Fallback diarization also failed: {e2}")
+                # Create a minimal result
+                from .speaker_diarization import SpeakerSegment
+                segment = SpeakerSegment(
+                    start_time=0.0,
+                    end_time=1.0,
+                    speaker_id="SPEAKER_00",
+                    confidence=0.5,
+                    text="[Diarization failed]"
+                )
+                return DiarizationResult(
+                    segments=[segment],
+                    speaker_mapping={"SPEAKER_00": "Speaker 1"},
+                    total_duration=1.0,
+                    num_speakers=1,
+                    overall_confidence=0.5
+                )
