@@ -2466,39 +2466,46 @@ class SpeakerDiarizer:
                 speaker_segments = [{
                     'start': 0.0,
                     'end': duration,
-                    'speaker': 'SPEAKER_1',
-                    'duration': duration
+                    'speaker': 'SPEAKER_1'
                 }]
             
-            # Step 2: Process each speaker segment with Groq API
-            print("   🔍 Step 2: Transcribing each speaker segment...")
+            # Step 2: Smart grouping of consecutive segments by speaker with 24MB limit
+            print("   🔍 Step 2: Smart grouping of speaker segments...")
             
             if not speech_recognizer:
                 raise ValueError("SpeechRecognizer required for transcription")
+            
+            # Group consecutive segments by speaker with 24MB size limit
+            grouped_segments = self._group_segments_by_speaker_with_size_limit(
+                speaker_segments, audio_file
+            )
+            
+            print(f"   📊 Grouped {len(speaker_segments)} segments into {len(grouped_segments)} groups")
             
             segments = []
             speaker_mapping = {}
             speaker_counter = 0
             
-            for i, seg_info in enumerate(speaker_segments):
-                print(f"      Processing segment {i+1}/{len(speaker_segments)}: "
-                      f"{seg_info['start']:.1f}s - {seg_info['end']:.1f}s")
+            # Process each grouped segment
+            for group_idx, group in enumerate(grouped_segments):
+                print(f"      Processing group {group_idx+1}/{len(grouped_segments)}: "
+                      f"{len(group['segments'])} segments, {group['total_duration']:.1f}s, {group['total_size_mb']:.1f}MB")
                 
                 # Map Pyannote speaker labels to consistent IDs
-                if seg_info['speaker'] not in speaker_mapping:
+                if group['speaker'] not in speaker_mapping:
                     speaker_counter += 1
-                    speaker_mapping[seg_info['speaker']] = f"SPEAKER_{speaker_counter-1:02d}"
+                    speaker_mapping[group['speaker']] = f"SPEAKER_{speaker_counter-1:02d}"
                 
-                speaker_id = speaker_mapping[seg_info['speaker']]
+                speaker_id = speaker_mapping[group['speaker']]
                 
-                # Extract audio chunk for this speaker segment
-                audio_chunk = self._extract_audio_chunk(
-                    audio_file, seg_info['start'], seg_info['end']
+                # Extract combined audio chunk for this speaker group
+                audio_chunk = self._extract_grouped_audio_chunk(
+                    audio_file, group['segments']
                 )
                 
                 if audio_chunk is not None:
-                    # Send speaker-specific audio chunk to Groq API
-                    print(f"         Sending {speaker_id} audio to Groq API...")
+                    # Send grouped speaker audio to Groq API
+                    print(f"         Sending {speaker_id} grouped audio to Groq API...")
                     
                     try:
                         if mode == "translation":
@@ -2513,7 +2520,18 @@ class SpeakerDiarizer:
                         if result and result.text:
                             transcription_text = result.text
                             confidence = result.confidence if hasattr(result, 'confidence') else 0.95
-                            print(f"         ✅ {speaker_id}: {transcription_text[:50]}...")
+                            print(f"         ✅ {speaker_id}: {transcription_text}")
+                            
+                            # Create a single grouped segment for the entire group
+                            grouped_segment = SpeakerSegment(
+                                start_time=group['start_time'],
+                                end_time=group['end_time'],
+                                speaker_id=speaker_id,
+                                text=transcription_text,
+                                confidence=confidence,
+                                transcription_confidence=confidence
+                            )
+                            segments.append(grouped_segment)
                         else:
                             transcription_text = "[No transcription available]"
                             confidence = 0.5
@@ -2521,22 +2539,16 @@ class SpeakerDiarizer:
                     
                     except Exception as api_error:
                         print(f"         ❌ {speaker_id}: Groq API error: {api_error}")
-                        transcription_text = "[Transcription error]"
-                        confidence = 0.3
-                
-                else:
-                    transcription_text = "[Audio extraction failed]"
-                    confidence = 0.3
-                
-                # Create speaker segment with accurate transcription
-                segment = SpeakerSegment(
-                    start_time=seg_info['start'],
-                    end_time=seg_info['end'],
-                    speaker_id=speaker_id,
-                    confidence=confidence
-                )
-                segment.text = transcription_text
-                segments.append(segment)
+                        # Create a grouped segment with error text
+                        grouped_segment = SpeakerSegment(
+                            start_time=group['start_time'],
+                            end_time=group['end_time'],
+                            speaker_id=speaker_id,
+                            text="[Transcription error]",
+                            confidence=0.3,
+                            transcription_confidence=0.3
+                        )
+                        segments.append(grouped_segment)
             
             # Step 3: Create final result
             print("   🔍 Step 3: Creating final diarization result...")
@@ -2552,7 +2564,7 @@ class SpeakerDiarizer:
             
             print(f"   ✅ CORRECT pipeline completed successfully!")
             print(f"      Speakers: {len(speaker_mapping)}")
-            print(f"      Segments: {len(segments)}")
+            print(f"      Groups: {len(grouped_segments)}")
             print(f"      Total duration: {result.total_duration:.1f}s")
             
             return result
@@ -2603,6 +2615,116 @@ class SpeakerDiarizer:
             
         except Exception as e:
             print(f"      ❌ Audio chunk extraction failed: {e}")
+            return None
+
+    def _group_segments_by_speaker_with_size_limit(self, speaker_segments, audio_file):
+        """
+        Group consecutive segments by speaker while respecting 24MB size limit.
+        
+        Args:
+            speaker_segments: List of speaker segments from Pyannote.audio
+            audio_file: Path to audio file for size calculation
+            
+        Returns:
+            List of grouped segments with size and duration info
+        """
+        if not speaker_segments:
+            return []
+        
+        grouped_segments = []
+        current_group = None
+        max_size_mb = 24.0  # 24MB limit for Groq API
+        
+        for seg_info in speaker_segments:
+            # Calculate segment size in MB
+            segment_duration = seg_info['end'] - seg_info['start']
+            # Approximate size: 16kHz, 32-bit float = 4 bytes per sample
+            # 1 second = 16,000 samples = 64,000 bytes = 0.064 MB
+            segment_size_mb = segment_duration * 0.064
+            
+            if current_group is None:
+                # Start new group
+                current_group = {
+                    'speaker': seg_info['speaker'],
+                    'segments': [seg_info],
+                    'total_duration': segment_duration,
+                    'total_size_mb': segment_size_mb,
+                    'start_time': seg_info['start'],
+                    'end_time': seg_info['end']
+                }
+            elif (current_group['speaker'] == seg_info['speaker'] and 
+                  current_group['total_size_mb'] + segment_size_mb <= max_size_mb):
+                # Add to current group (same speaker, within size limit)
+                current_group['segments'].append(seg_info)
+                current_group['total_duration'] += segment_duration
+                current_group['total_size_mb'] += segment_size_mb
+                current_group['end_time'] = seg_info['end']
+            else:
+                # Finish current group and start new one
+                grouped_segments.append(current_group)
+                current_group = {
+                    'speaker': seg_info['speaker'],
+                    'segments': [seg_info],
+                    'total_duration': segment_duration,
+                    'total_size_mb': segment_size_mb,
+                    'start_time': seg_info['start'],
+                    'end_time': seg_info['end']
+                }
+        
+        # Add the last group
+        if current_group is not None:
+            grouped_segments.append(current_group)
+        
+        return grouped_segments
+
+    def _extract_grouped_audio_chunk(self, audio_file, segments):
+        """
+        Extract combined audio chunk for a group of segments.
+        
+        Args:
+            audio_file: Path to audio file
+            segments: List of segment info dictionaries
+            
+        Returns:
+            Combined audio data as numpy array
+        """
+        try:
+            import soundfile as sf
+            import numpy as np
+            
+            # Load entire audio file
+            audio_data, sample_rate = sf.read(audio_file)
+            
+            # Convert to mono if stereo
+            if len(audio_data.shape) > 1:
+                audio_data = audio_data[:, 0]
+            
+            # Resample to 16kHz if needed
+            if sample_rate != 16000:
+                from scipy import signal
+                audio_data = signal.resample(
+                    audio_data, int(len(audio_data) * 16000 / sample_rate)
+                )
+                sample_rate = 16000
+            
+            # Find the overall start and end times for the group
+            start_time = min(seg['start'] for seg in segments)
+            end_time = max(seg['end'] for seg in segments)
+            
+            # Convert times to sample indices
+            start_sample = int(start_time * sample_rate)
+            end_sample = int(end_time * sample_rate)
+            
+            # Extract the combined audio chunk
+            combined_chunk = audio_data[start_sample:end_sample]
+            
+            print(f"         Extracted grouped audio: {len(combined_chunk)} samples, "
+                  f"{len(combined_chunk)/sample_rate:.1f}s")
+            
+            return combined_chunk
+            
+        except Exception as e:
+            print(f"      ❌ Grouped audio extraction failed: {e}")
             return None
 
 

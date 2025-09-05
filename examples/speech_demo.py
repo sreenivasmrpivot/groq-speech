@@ -113,7 +113,7 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
             print(f"⏱️  Total duration: {result.total_duration:.1f}s")
             print(f"🎯 Overall confidence: {result.overall_confidence:.3f}")
 
-            print(f"\n🎤 Speaker Segments with Accurate Transcription:")
+            print(f"\n🎤 Speaker Groups with Accurate Transcription:")
             print("=" * 70)
 
             for i, segment in enumerate(result.segments):
@@ -127,11 +127,11 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
                 )
 
                 print(f"\n🎤 {speaker}:")
-                print(
-                    f"   {i+1}. {start_t:8.2f}s - {end_t:8.2f}s " f"({duration:5.2f}s)"
-                )
+                # print(
+                #     f"   {i+1}. {start_t:8.2f}s - {end_t:8.2f}s " f"({duration:5.2f}s)"
+                # )
                 print(f"      {text}")
-                print(f"      Confidence: {confidence:.3f}")
+                # print(f"      Confidence: {confidence:.3f}")
 
             return result
 
