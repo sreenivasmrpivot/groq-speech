@@ -448,10 +448,18 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
                 current_chunk_frames.append(data)
                 current_chunk_samples += CHUNK
                 
-                # Check if current chunk exceeds 24MB limit
-                if current_chunk_samples >= MAX_SAMPLES:
+                # Convert current audio to numpy for VAD analysis
+                current_audio = np.frombuffer(b"".join(current_chunk_frames), dtype=np.float32)
+                duration = len(current_audio) / RATE
+                
+                # Check if we should create a chunk using VAD
+                should_create, reason = recognizer.vad_service.should_create_chunk(
+                    current_audio, RATE, MAX_DURATION_SECONDS
+                )
+                
+                if should_create:
                     chunk_count += 1
-                    print(f"🔄 Chunk {chunk_count} reached {MAX_DURATION_SECONDS/60:.1f}min limit, processing...")
+                    print(f"\n🔄 Chunk {chunk_count} created: {reason}")
                     
                     # Process current chunk
                     chunk_audio = np.frombuffer(b"".join(current_chunk_frames), dtype=np.float32)
@@ -634,6 +642,7 @@ def process_microphone_basic(mode: str, recognizer: SpeechRecognizer, enable_dia
         # Max duration = 6,291,456 / 16,000 ≈ 393 seconds ≈ 6.5 minutes
         MAX_SAMPLES = int(RATE * 390)  # Conservative 6.5 minutes
         MAX_BYTES = 24 * 1024 * 1024  # 24MB in bytes
+        MAX_DURATION_SECONDS = 390  # 6.5 minutes
 
         print(f"🎤 Recording continuously...")
         print(f"💡 Audio will be chunked at 24MB limit ({MAX_SAMPLES/RATE/60:.1f} minutes) for optimal processing")
@@ -675,6 +684,8 @@ def process_microphone_basic(mode: str, recognizer: SpeechRecognizer, enable_dia
         chunk_count = 0
         accumulated_audio = []
         accumulated_bytes = 0
+        last_visual_update = time.time()
+        visual_update_interval = 0.5  # Update visual feedback every 0.5 seconds
 
         try:
             while True:  # Continuous loop until Ctrl+C
@@ -685,16 +696,28 @@ def process_microphone_basic(mode: str, recognizer: SpeechRecognizer, enable_dia
                 accumulated_audio.append(data)
                 accumulated_bytes += len(data)
                 
-                # Check if we've reached 24MB limit
-                if accumulated_bytes >= MAX_BYTES:
+                # Convert current audio to numpy for VAD analysis
+                audio_bytes = b"".join(accumulated_audio)
+                audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
+                duration = len(audio_array) / RATE
+                
+                # Visual feedback - show audio level and status
+                current_time = time.time()
+                if current_time - last_visual_update >= visual_update_interval:
+                    audio_level = recognizer.vad_service.get_audio_level(audio_array[-RATE:])  # Last 1 second
+                    level_bars = "█" * int(audio_level * 20) + "░" * (20 - int(audio_level * 20))
+                    print(f"\r🎤 Listening... [{level_bars}] {audio_level:.2f} | {duration:.1f}s | {accumulated_bytes/1024/1024:.1f}MB", end="", flush=True)
+                    last_visual_update = current_time
+                
+                # Check if we should create a chunk using VAD
+                should_create, reason = recognizer.vad_service.should_create_chunk(
+                    audio_array, RATE, MAX_DURATION_SECONDS
+                )
+                
+                if should_create:
                     chunk_count += 1
-                    print(f"🔄 Chunk {chunk_count} reached 24MB limit ({accumulated_bytes/1024/1024:.1f}MB), queuing for processing...")
-                    
-                    # Convert accumulated bytes to numpy array
-                    audio_bytes = b"".join(accumulated_audio)
-                    audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
-                    duration = len(audio_array) / RATE
-                    print(f"📊 Chunk {chunk_count}: {len(audio_array)} samples, {duration:.1f}s")
+                    print(f"\n🔄 Chunk {chunk_count} created: {reason}")
+                    print(f"📊 Chunk {chunk_count}: {len(audio_array)} samples, {duration:.1f}s, {accumulated_bytes/1024/1024:.1f}MB")
                     
                     # Queue for processing
                     audio_queue.put((audio_array, chunk_count))

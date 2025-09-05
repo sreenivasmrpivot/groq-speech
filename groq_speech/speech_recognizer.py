@@ -71,6 +71,7 @@ from .result_reason import ResultReason, CancellationReason
 from .config import Config
 from .property_id import PropertyId
 from .speaker_diarization import DiarizationResult
+from .vad_service import VADConfig, VADService
 
 
 # ============================================================================
@@ -807,6 +808,10 @@ class SpeechRecognizer:
         self._diarization_service = None  # Lazy-loaded only when needed
         self.event_manager = EventManager()
         self.performance_tracker = PerformanceTracker()
+        
+        # Initialize VAD service for intelligent chunking
+        self.vad_config = VADConfig(sample_rate=sample_rate)
+        self.vad_service = VADService(self.vad_config)
         
         # Initialize audio processor and chunker
         audio_config_dict = Config.get_audio_config()
