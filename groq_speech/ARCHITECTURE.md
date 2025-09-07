@@ -61,6 +61,7 @@ The main class that orchestrates all speech recognition operations. It follows S
 ### Service Classes (Internal)
 - **DiarizationService**: Handles speaker diarization operations
 - **AudioProcessor**: Manages audio processing and chunking
+- **VADService**: Voice Activity Detection with multiple fallback options
 - **GroqAPIClient**: Handles API communication
 - **ResponseParser**: Parses API responses
 - **EventManager**: Manages real-time events
@@ -83,14 +84,14 @@ User → File Input → SpeechRecognizer.recognize_file(enable_diarization=False
 ```
 User → File Input → SpeechRecognizer.recognize_file(enable_diarization=True)
      → DiarizationService → Pyannote.audio → Speaker Detection
-     → Audio Chunking → GroqAPIClient (per segment) → ResponseParser
+     → Smart Grouping (24MB chunks) → GroqAPIClient (per segment) → ResponseParser
      → DiarizationResult (with speaker attribution)
 ```
 
 ### 3. Microphone Processing
 ```
 User → Microphone → SpeechRecognizer.recognize_microphone()
-     → AudioProcessor → GroqAPIClient → ResponseParser → SpeechRecognitionResult
+     → AudioProcessor → VADService → GroqAPIClient → ResponseParser → SpeechRecognitionResult
 ```
 
 ### 4. Translation Processing
@@ -102,29 +103,52 @@ User → Audio Input → SpeechRecognizer.translate_file/translate_audio_data()
 ## Configuration System
 
 ### Environment Variables
-- `GROQ_API_KEY`: Required API key
-- `HF_TOKEN`: Optional, for speaker diarization
-- `GROQ_MODEL_ID`: Optional, model selection
-- `GROQ_TEMPERATURE`: Optional, model temperature
+```bash
+# Required
+GROQ_API_KEY=your_api_key_here
+
+# Optional
+HF_TOKEN=your_huggingface_token_here  # For diarization
+GROQ_MODEL_ID=whisper-large-v3        # Model selection
+GROQ_TEMPERATURE=0.0                  # Model temperature
+```
 
 ### Configuration Classes
 - **SpeechConfig**: Speech recognition settings
 - **DiarizationConfig**: Diarization parameters
-- **Config**: Centralized configuration management
+- **VADConfig**: Voice Activity Detection settings
+
+### Configuration Validation
+```python
+from groq_speech.config import Config
+
+# Validate configuration
+if Config.validate_config():
+    print("✅ Configuration is valid")
+    
+# Get current settings
+settings = Config.get_diarization_config()
+print(f"Chunk strategy: {settings['chunk_strategy']}")
+```
 
 ## Error Handling
 
 ### Exception Hierarchy
-- **GroqSpeechException**: Base exception class
-- **ConfigurationError**: Configuration-related errors
-- **APIError**: API communication errors
-- **AudioError**: Audio processing errors
-- **DiarizationError**: Diarization-specific errors
+```python
+from groq_speech.exceptions import (
+    GroqSpeechException,      # Base exception
+    ConfigurationError,       # Configuration issues
+    APIError,                 # API communication errors
+    AudioError,               # Audio processing errors
+    DiarizationError          # Diarization-specific errors
+)
+```
 
 ### Fallback Mechanisms
 - **Diarization Fallback**: Falls back to basic transcription if diarization fails
 - **API Retry**: Automatic retry for transient API errors
 - **Audio Processing**: Graceful handling of audio format issues
+- **VAD Fallback**: Multiple VAD implementations with fallback chain
 
 ## Performance Optimizations
 
@@ -134,52 +158,38 @@ User → Audio Input → SpeechRecognizer.translate_file/translate_audio_data()
 - **API Calls**: O(1) per chunk, O(k) total where k is number of chunks
 - **Memory Usage**: O(1) for streaming, O(n) for file processing
 
-### Parallel Processing
-- **Diarization**: Parallel processing of speaker segments
-- **API Calls**: Concurrent processing where possible
-- **Audio Chunking**: Optimized chunking strategies
+### Optimization Features
+- **Smart Grouping**: 24MB-optimized speaker segment grouping
+- **Voice Activity Detection**: Intelligent silence detection
+- **Caching**: Model and configuration caching
+- **Retry Logic**: Automatic retry for transient errors
+- **Parallel Processing**: Concurrent processing where applicable
 
-## Usage Examples
+## Thread Safety
 
-### Basic File Recognition
-```python
-from groq_speech import SpeechRecognizer, SpeechConfig
+The SDK is designed to be thread-safe:
+- **Thread-safe request tracking**
+- **Lock-protected result collection**
+- **Concurrent request management**
+- **Safe configuration access**
 
-config = SpeechConfig()
-recognizer = SpeechRecognizer(config)
-result = recognizer.recognize_file("audio.wav")
-print(f"Recognized: {result.text}")
-```
+## Memory Management
 
-### File Recognition with Diarization
-```python
-result = recognizer.recognize_file("audio.wav", enable_diarization=True)
-for segment in result.segments:
-    print(f"Speaker {segment.speaker_id}: {segment.text}")
-```
+- **Efficient audio data handling**
+- **Configurable processing modes**
+- **Automatic cleanup of temporary data**
+- **Streaming support for large files**
 
-### Translation
-```python
-result = recognizer.translate_file("audio.wav", enable_diarization=True)
-print(f"Translated: {result.text}")
-```
+## Future Enhancements
 
-### Microphone Recognition
-```python
-result = recognizer.recognize_microphone(duration=10)  # 10 seconds
-print(f"Recognized: {result.text}")
-```
+### Planned Features
+1. **Real-time Streaming**: Optimize for live microphone input
+2. **Speaker Persistence**: Maintain speaker identity across sessions
+3. **Advanced Chunking**: Intelligent audio segmentation
+4. **Performance Monitoring**: Real-time pipeline metrics
 
-## Migration from Previous Versions
-
-### Removed Components
-- **AudioConfig**: Functionality moved to SpeechRecognizer
-- **EnhancedDiarizer**: Consolidated into Diarizer
-- **SpeakerDiarizer**: Consolidated into Diarizer
-- **Multiple Entry Points**: Simplified to single SpeechRecognizer
-
-### Breaking Changes
-- Constructor parameters simplified
-- Method signatures standardized
-- Diarization enabled by default for files
-- Consistent `enable_diarization` parameter across all methods
+### Integration Opportunities
+1. **Custom Models**: Support for other speaker detection models
+2. **Multi-language**: Enhanced language support
+3. **Cloud Processing**: Distributed processing capabilities
+4. **API Extensions**: Additional Groq API features
