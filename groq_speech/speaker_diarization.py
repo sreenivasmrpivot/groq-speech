@@ -97,7 +97,7 @@ def _import_pyannote():
 
 
 from .speech_config import SpeechConfig
-from .exceptions import DiarizationError
+# DiarizationError removed - using standard exceptions
 
 
 class DiarizationConfig:
@@ -780,7 +780,7 @@ class GlobalSpeakerTracker:
 
 
 # TO BE DELETED - Internal implementation, not a public entry point
-class SpeakerDiarizer:
+class _UnusedSpeakerDiarizer:
     """
     Main class for speaker diarization operations.
 
@@ -881,11 +881,10 @@ class SpeakerDiarizer:
 
             print("🔑 HF_TOKEN configured, attempting to load Pyannote models...")
 
-            # Use global cache to avoid repeated model loading
+            # Load Pyannote pipeline directly
             try:
-                from .pyannote_cache import get_cached_pipeline
-                
-                self._pipeline = get_cached_pipeline(
+                from pyannote.audio import Pipeline
+                self._pipeline = Pipeline.from_pretrained(
                     "pyannote/speaker-diarization-3.1", 
                     use_auth_token=hf_token
                 )
@@ -1619,7 +1618,7 @@ class SpeakerDiarizer:
 
             # Check if pipeline is available
             if self._pipeline is None:
-                raise DiarizationError(
+                raise ValueError(
                     "Pyannote pipeline is not available. Please check your HF_TOKEN and ensure "
                     "you have access to the pyannote/speaker-diarization-3.1 model."
                 )
@@ -1630,7 +1629,7 @@ class SpeakerDiarizer:
             )
 
             if not chunks:
-                raise DiarizationError("Failed to create audio chunks")
+                raise ValueError("Failed to create audio chunks")
 
             print(
                 f"🔄 Processing {len(chunks)} chunks with {overlap_duration}s overlap..."
@@ -1673,7 +1672,7 @@ class SpeakerDiarizer:
                     continue
 
             if not all_segments:
-                raise DiarizationError("No segments found in any chunks")
+                raise ValueError("No segments found in any chunks")
 
             # Sort segments by start time
             all_segments.sort(key=lambda x: x.start_time)
@@ -2734,7 +2733,7 @@ class Diarizer:
     
     def __init__(self, config: Optional[DiarizationConfig] = None):
         self.config = config or DiarizationConfig()
-        self.base_diarizer = SpeakerDiarizer(config)
+        # Direct implementation without base diarizer
         
     def diarize(self, audio_file: str, mode: str, speech_recognizer=None) -> DiarizationResult:
         """
@@ -2749,34 +2748,260 @@ class Diarizer:
             DiarizationResult with speaker-separated transcription
         """
         try:
-            # Use the enhanced diarization method from SpeakerDiarizer
-            return self.base_diarizer.diarize_with_accurate_transcription(
+            # Use the enhanced diarization method directly
+            return self.diarize_with_accurate_transcription(
                 audio_file, mode, speech_recognizer
             )
         except Exception as e:
             print(f"Diarization failed: {e}")
-            # Fallback to basic diarization - fix the method call
-            try:
+            # Create a minimal result
+            segment = SpeakerSegment(
+                start_time=0.0,
+                end_time=1.0,
+                speaker_id="SPEAKER_00",
+                confidence=0.5,
+                text="[Diarization failed]"
+            )
+            return DiarizationResult(
+                segments=[segment],
+                speaker_mapping={"SPEAKER_00": "Speaker 1"},
+                total_duration=1.0,
+                num_speakers=1,
+                overall_confidence=0.5
+            )
+    
+    def diarize_with_accurate_transcription(self, audio_file: str, mode: str, 
+                                          speech_recognizer=None) -> "DiarizationResult":
+        """
+        CORRECT PIPELINE: Pyannote.audio FIRST, then Groq API per segment.
+        
+        This is the proper approach:
+        1. Pyannote.audio detects speaker segments and timestamps
+        2. Audio is split into speaker-specific chunks
+        3. Each chunk is sent to Groq API for accurate transcription
+        4. Perfect speaker attribution with accurate text
+        
+        Args:
+            audio_file: Path to audio file
+            mode: 'transcription' or 'translation'
+            speech_recognizer: SpeechRecognizer instance for Groq API calls
+            
+        Returns:
+            DiarizationResult with accurate speaker-specific transcriptions
+        """
+        print("🎭 Running CORRECT diarization pipeline...")
+        print("   1. Pyannote.audio → Speaker detection")
+        print("   2. Audio chunking → Speaker-specific segments") 
+        print("   3. Groq API → Accurate transcription per segment")
+        
+        try:
+            # Step 1: Pyannote.audio for speaker detection
+            print("   🔍 Step 1: Detecting speakers with Pyannote.audio...")
+            
+            # Get HF token from Config
+            from .config import Config
+            hf_token = Config.get_hf_token()
+            
+            if not hf_token or hf_token == "your_hf_token_here":
+                raise ValueError("HF_TOKEN not configured for Pyannote.audio")
+            
+            # Initialize Pyannote pipeline
+            from pyannote.audio import Pipeline
+            pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=hf_token
+            )
+            
+            # Run diarization to get speaker segments
+            diarization = pipeline(audio_file)
+            
+            # Extract speaker segments with timestamps
+            speaker_segments = []
+            for turn, _, speaker in diarization.itertracks(yield_label=True):
+                speaker_segments.append({
+                    'start': turn.start,
+                    'end': turn.end,
+                    'speaker': speaker,
+                    'duration': turn.end - turn.start
+                })
+            
+            print(f"   ✅ Detected {len(speaker_segments)} speaker segments")
+            
+            if not speaker_segments:
+                print("   ⚠️ No speaker segments detected, creating single speaker")
+                # Get audio duration for single speaker
                 import soundfile as sf
                 audio_data, sample_rate = sf.read(audio_file)
-                return self.base_diarizer.diarize_audio(
-                    audio_data, sample_rate
+                duration = len(audio_data) / sample_rate
+                
+                speaker_segments = [{
+                    'start': 0.0,
+                    'end': duration,
+                    'speaker': 'SPEAKER_1'
+                }]
+            
+            # Step 2: Smart grouping of consecutive segments by speaker with 24MB limit
+            print("   🔍 Step 2: Smart grouping of speaker segments...")
+            
+            if not speech_recognizer:
+                raise ValueError("SpeechRecognizer required for transcription")
+            
+            # Group consecutive segments by speaker with 24MB size limit
+            grouped_segments = self._group_segments_by_speaker_with_size_limit(
+                speaker_segments, audio_file
+            )
+            
+            print(f"   📊 Grouped {len(speaker_segments)} segments into {len(grouped_segments)} groups")
+            
+            segments = []
+            speaker_mapping = {}
+            speaker_counter = 0
+            
+            # Process each grouped segment
+            for group_idx, group in enumerate(grouped_segments):
+                print(f"      Processing group {group_idx+1}/{len(grouped_segments)}: "
+                      f"{len(group['segments'])} segments, {group['total_duration']:.1f}s, {group['total_size_mb']:.1f}MB")
+                
+                # Map Pyannote speaker labels to consistent IDs
+                if group['speaker'] not in speaker_mapping:
+                    speaker_counter += 1
+                    speaker_mapping[group['speaker']] = f"SPEAKER_{speaker_counter-1:02d}"
+                
+                speaker_id = speaker_mapping[group['speaker']]
+                
+                # Extract combined audio chunk for this speaker group
+                combined_chunk = self._extract_audio_chunk(
+                    audio_file, group['start_time'], group['end_time']
                 )
-            except Exception as e2:
-                print(f"Fallback diarization also failed: {e2}")
-                # Create a minimal result
-                from .speaker_diarization import SpeakerSegment
-                segment = SpeakerSegment(
-                    start_time=0.0,
-                    end_time=1.0,
-                    speaker_id="SPEAKER_00",
-                    confidence=0.5,
-                    text="[Diarization failed]"
-                )
-                return DiarizationResult(
-                    segments=[segment],
-                    speaker_mapping={"SPEAKER_00": "Speaker 1"},
-                    total_duration=1.0,
-                    num_speakers=1,
-                    overall_confidence=0.5
-                )
+                
+                if combined_chunk is None:
+                    print(f"      ⚠️ Skipping group {group_idx+1} - audio extraction failed")
+                    continue
+                
+                # Step 3: Transcribe with Groq API
+                print(f"      🎤 Transcribing group {group_idx+1} with Groq API...")
+                
+                try:
+                    if mode == "translation":
+                        result = speech_recognizer.translate_audio_data(combined_chunk)
+                    else:
+                        result = speech_recognizer.recognize_audio_data(combined_chunk)
+                    
+                    if result and result.text:
+                        # Create speaker segment with accurate transcription
+                        segment = SpeakerSegment(
+                            start_time=group['start_time'],
+                            end_time=group['end_time'],
+                            speaker_id=speaker_id,
+                            text=result.text,
+                            confidence=result.confidence
+                        )
+                        segments.append(segment)
+                        print(f"      ✅ Group {group_idx+1}: {result.text[:100]}{'...' if len(result.text) > 100 else ''}")
+                    else:
+                        print(f"      ⚠️ Group {group_idx+1}: No text detected")
+                        
+                except Exception as e:
+                    print(f"      ❌ Group {group_idx+1} transcription failed: {e}")
+                    continue
+            
+            if not segments:
+                raise ValueError("No segments could be transcribed")
+            
+            # Create final result
+            result = DiarizationResult(
+                segments=segments,
+                speaker_mapping=speaker_mapping,
+                total_duration=grouped_segments[-1]['end_time'] if grouped_segments else 0.0,
+                num_speakers=len(speaker_mapping),
+                overall_confidence=sum(s.confidence for s in segments) / len(segments) if segments else 0.0
+            )
+            
+            print(f"   ✅ Diarization completed: {len(segments)} groups, {len(speaker_mapping)} speakers")
+            return result
+            
+        except Exception as e:
+            print(f"   ❌ Diarization failed: {e}")
+            raise
+    
+    def _group_segments_by_speaker_with_size_limit(self, speaker_segments, audio_file):
+        """Group consecutive segments by speaker with 24MB size limit."""
+        if not speaker_segments:
+            return []
+        
+        # Sort segments by start time
+        sorted_segments = sorted(speaker_segments, key=lambda x: x['start'])
+        
+        grouped = []
+        current_group = None
+        
+        for segment in sorted_segments:
+            if current_group is None or current_group['speaker'] != segment['speaker']:
+                # Start new group
+                if current_group:
+                    grouped.append(current_group)
+                
+                current_group = {
+                    'speaker': segment['speaker'],
+                    'segments': [segment],
+                    'start_time': segment['start'],
+                    'end_time': segment['end'],
+                    'total_duration': segment['duration']
+                }
+            else:
+                # Add to current group
+                current_group['segments'].append(segment)
+                current_group['end_time'] = segment['end']
+                current_group['total_duration'] = current_group['end_time'] - current_group['start_time']
+            
+            # Check size limit (24MB = ~6.5 minutes at 16kHz)
+            estimated_duration_minutes = current_group['total_duration'] / 60
+            if estimated_duration_minutes > 6.5:
+                # Group is too large, finalize it and start new one
+                grouped.append(current_group)
+                current_group = None
+        
+        # Add final group
+        if current_group:
+            grouped.append(current_group)
+        
+        # Calculate size estimates for each group
+        for group in grouped:
+            group['total_size_mb'] = (group['total_duration'] * 16000 * 4) / (1024 * 1024)  # Rough estimate
+        
+        return grouped
+    
+    def _extract_audio_chunk(self, audio_file, start_time, end_time):
+        """Extract audio chunk from file."""
+        try:
+            import soundfile as sf
+            audio_data, sample_rate = sf.read(audio_file)
+            
+            start_sample = int(start_time * sample_rate)
+            end_sample = int(end_time * sample_rate)
+            
+            chunk = audio_data[start_sample:end_sample]
+            
+            # Convert to mono if stereo
+            if len(chunk.shape) > 1:
+                chunk = chunk[:, 0]
+            
+            # Resample to 16kHz if needed
+            if sample_rate != 16000:
+                from scipy import signal
+                chunk = signal.resample(chunk, int(len(chunk) * 16000 / sample_rate))
+            
+            # Apply noise filtering for better transcription quality
+            try:
+                from .vad_service import VADService, VADConfig
+                vad_service = VADService(VADConfig())
+                chunk = vad_service._apply_noise_filtering(chunk, 16000)
+            except Exception as e:
+                # Continue without noise filtering if it fails
+                pass
+            
+            return chunk
+            
+        except Exception as e:
+            print(f"      ❌ Audio extraction failed: {e}")
+            return None

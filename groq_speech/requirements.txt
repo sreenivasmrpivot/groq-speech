@@ -19,5 +19,9 @@ scikit-learn>=1.0.0
 silero-vad>=4.0.0
 webrtcvad>=2.0.10
 
+# Audio Processing and Noise Filtering
+noisereduce>=3.0.0
+pydub>=0.25.1
+
 # Performance and caching
 pickle5>=0.0.11; python_version < "3.8"

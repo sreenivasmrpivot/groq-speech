@@ -290,24 +290,6 @@ class Config:
         except (ValueError, TypeError):
             return None
 
-    @classmethod
-    def validate_api_key(cls) -> bool:
-        """
-        Validate that API key is properly configured.
-
-        CRITICAL: This method ensures the Groq API key is set and valid
-        before any API calls are made. It prevents runtime errors and
-        provides clear feedback about configuration issues.
-
-        Returns:
-            True if API key is valid, False otherwise
-
-        Validation checks:
-        - API key is not empty or missing
-        - API key is not the placeholder value
-        - API key format is acceptable
-        """
-        return bool(cls.GROQ_API_KEY and cls.GROQ_API_KEY != "your_groq_api_key_here")
 
     @classmethod
     def get_api_key(cls) -> str:
@@ -329,7 +311,7 @@ class Config:
         - Clear error messages for configuration issues
         - Consistent API key access across the system
         """
-        if not cls.validate_api_key():
+        if not cls.GROQ_API_KEY or cls.GROQ_API_KEY == "your_groq_api_key_here":
             raise ValueError(
                 "GROQ_API_KEY not set. Please set it in your .env file or environment variables."
             )
@@ -464,68 +446,7 @@ class Config:
             "enable_context_awareness": cls.DIARIZATION_ENABLE_CONTEXT_AWARENESS,
         }
 
-    @classmethod
-    def get_chunking_config(cls) -> Dict[str, Any]:
-        """Get chunking configuration for backward compatibility."""
-        return {
-            "buffer_duration": cls.DIARIZATION_MAX_CHUNK_DURATION,
-            "overlap_duration": cls.DIARIZATION_OVERLAP_DURATION,
-            "chunk_size": 4096,  # Default audio chunk size
-        }
 
-    @classmethod
-    def validate_config(cls) -> bool:
-        """Validate the configuration settings."""
-        errors = []
-
-        if not cls.GROQ_API_KEY:
-            errors.append("GROQ_API_KEY is required")
-
-        if cls.DIARIZATION_MIN_SEGMENT_DURATION < 0.5:
-            errors.append(
-                "DIARIZATION_MIN_SEGMENT_DURATION must be at least 0.5 seconds"
-            )
-
-        if (
-            cls.DIARIZATION_SILENCE_THRESHOLD < 0.1
-            or cls.DIARIZATION_SILENCE_THRESHOLD > 1.0
-        ):
-            errors.append("DIARIZATION_SILENCE_THRESHOLD must be between 0.1 and 1.0")
-
-        if (
-            cls.DIARIZATION_SPEAKER_CHANGE_SENSITIVITY < 0.1
-            or cls.DIARIZATION_SPEAKER_CHANGE_SENSITIVITY > 1.0
-        ):
-            errors.append(
-                "DIARIZATION_SPEAKER_CHANGE_SENSITIVITY must be between 0.1 and 1.0"
-            )
-
-        if cls.DIARIZATION_MIN_CHUNK_DURATION < 5.0:
-            errors.append("DIARIZATION_MIN_CHUNK_DURATION must be at least 5.0 seconds")
-
-        if cls.DIARIZATION_MAX_CHUNK_DURATION < cls.DIARIZATION_MIN_CHUNK_DURATION:
-            errors.append(
-                "DIARIZATION_MAX_CHUNK_DURATION must be greater than DIARIZATION_MIN_CHUNK_DURATION"
-            )
-
-        if (
-            cls.DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD < 0.5
-            or cls.DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD > 1.0
-        ):
-            errors.append(
-                "DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD must be between 0.5 and 1.0"
-            )
-
-        if cls.DIARIZATION_MAX_SPEAKERS < 1 or cls.DIARIZATION_MAX_SPEAKERS > 10:
-            errors.append("DIARIZATION_MAX_SPEAKERS must be between 1 and 10")
-
-        if errors:
-            print("Configuration validation errors:")
-            for error in errors:
-                print(f"  ❌ {error}")
-            return False
-
-        return True
 
 
 # Convenience function to get config

@@ -6,10 +6,11 @@ Consumers of the SDK don't need to know about this implementation.
 """
 
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
-import time
+from typing import List, Tuple, Optional
 import threading
 from dataclasses import dataclass
+import scipy.signal
+import time
 
 # Lazy import to avoid loading VAD libraries unless needed
 _silero_vad_model = None
@@ -38,7 +39,7 @@ def _import_webrtc_vad():
     """Try to import WebRTC VAD."""
     try:
         import webrtcvad
-        vad = webrtcvad.Vad(2)  # Aggressiveness level 2 (0-3)
+        vad = webrtcvad.Vad(1)  # Aggressiveness level 1 (0-3) - Medium sensitivity
         return vad, "webrtc"
     except Exception as e:
         return None, None
@@ -79,11 +80,15 @@ def _initialize_vad():
 @dataclass
 class VADConfig:
     """Configuration for Voice Activity Detection."""
-    threshold: float = 0.5  # Speech detection threshold (0.0-1.0)
-    min_speech_duration_ms: int = 250  # Minimum speech duration in milliseconds
-    min_silence_duration_ms: int = 10000  # Minimum silence duration in milliseconds (10 seconds)
+    threshold: float = 0.3  # Speech detection threshold (0.0-1.0) - Lowered for better sensitivity
+    min_speech_duration_ms: int = 200  # Minimum speech duration in milliseconds - Reduced for better detection
+    min_silence_duration_ms: int = 8000  # Minimum silence duration in milliseconds (8 seconds) - More responsive
     max_silence_duration_ms: int = 10000  # Maximum silence before forcing chunk (10 seconds)
     sample_rate: int = 16000  # Audio sample rate
+    enable_noise_filtering: bool = True  # Enable noise reduction before VAD
+    noise_reduction_strength: float = 0.6  # Noise reduction strength (0.0-1.0) - Reduced to preserve speech
+    webrtc_aggressiveness: int = 1  # WebRTC VAD aggressiveness (0-3, 1 = medium sensitivity)
+    max_chunk_size_mb: float = 20.0  # Maximum chunk size before forcing chunk (20MB to stay under 24MB)
 
 @dataclass
 class SpeechSegment:
@@ -116,6 +121,8 @@ class VADService:
         self._is_initialized = False
         self._lock = threading.Lock()
         self._vad_type = None
+        self._silence_start_time = None  # Track when silence period started
+        self._last_audio_time = None     # Track when we last had audio
         
     def _ensure_initialized(self) -> bool:
         """Ensure VAD model is loaded."""
@@ -149,11 +156,111 @@ class VADService:
                 self._vad_type = "fallback"
                 return False
     
-    def is_available(self) -> bool:
-        """Check if VAD is available."""
-        return self._ensure_initialized()
+    def _apply_noise_filtering(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """
+        Apply noise reduction to audio data using multiple techniques.
+        
+        Args:
+            audio_data: Audio data as numpy array
+            sample_rate: Audio sample rate
+            
+        Returns:
+            Noise-filtered audio data
+        """
+        if not self.config.enable_noise_filtering:
+            return audio_data
+            
+        try:
+            # Try to import noisereduce
+            import noisereduce as nr
+            
+            # Apply noise reduction with more conservative settings
+            filtered_audio = nr.reduce_noise(
+                y=audio_data,
+                sr=sample_rate,
+                prop_decrease=self.config.noise_reduction_strength,
+                stationary=False,  # Non-stationary noise (better for speech)
+                use_tqdm=False
+            )
+            
+            # Apply additional spectral gating to remove residual noise
+            filtered_audio = self._apply_spectral_gating(filtered_audio, sample_rate)
+            
+            return filtered_audio.astype(audio_data.dtype)
+            
+        except ImportError:
+            # Fallback to simple high-pass filter if noisereduce not available
+            return self._apply_simple_noise_filter(audio_data, sample_rate)
+        except Exception as e:
+            print(f"⚠️  Noise filtering failed: {e}, using original audio")
+            return audio_data
     
-    def detect_speech_segments(self, audio_data: np.ndarray, 
+    def _apply_simple_noise_filter(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """
+        Apply simple noise filtering using high-pass filter.
+        
+        Args:
+            audio_data: Audio data as numpy array
+            sample_rate: Audio sample rate
+            
+        Returns:
+            Filtered audio data
+        """
+        try:
+            # High-pass filter to remove low-frequency noise
+            nyquist = sample_rate / 2
+            cutoff = 80  # Hz - remove very low frequency noise
+            normalized_cutoff = cutoff / nyquist
+            
+            # Design Butterworth high-pass filter
+            b, a = scipy.signal.butter(4, normalized_cutoff, btype='high', analog=False)
+            
+            # Apply filter
+            filtered_audio = scipy.signal.filtfilt(b, a, audio_data)
+            
+            return filtered_audio.astype(audio_data.dtype)
+            
+        except Exception as e:
+            print(f"⚠️  Simple noise filtering failed: {e}, using original audio")
+            return audio_data
+    
+    def _apply_spectral_gating(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """
+        Apply spectral gating to remove residual noise.
+        
+        Args:
+            audio_data: Audio data as numpy array
+            sample_rate: Audio sample rate
+            
+        Returns:
+            Spectrally gated audio data
+        """
+        try:
+            # Calculate RMS energy
+            rms = np.sqrt(np.mean(audio_data**2))
+            
+            # Only apply gating if audio is very quiet (likely noise)
+            if rms < 0.01:  # Very quiet threshold
+                # Apply gentle high-pass filter to remove low-frequency noise
+                nyquist = sample_rate / 2
+                cutoff = 100  # Hz - remove very low frequency noise
+                normalized_cutoff = cutoff / nyquist
+                
+                # Design Butterworth high-pass filter
+                b, a = scipy.signal.butter(2, normalized_cutoff, btype='high', analog=False)
+                
+                # Apply filter
+                filtered_audio = scipy.signal.filtfilt(b, a, audio_data)
+                
+                return filtered_audio.astype(audio_data.dtype)
+            else:
+                return audio_data
+                
+        except Exception as e:
+            print(f"⚠️  Spectral gating failed: {e}, using original audio")
+            return audio_data
+    
+    def _detect_speech_segments(self, audio_data: np.ndarray, 
                              sample_rate: Optional[int] = None) -> List[SpeechSegment]:
         """
         Detect speech segments in audio data.
@@ -170,11 +277,14 @@ class VADService:
             
         sample_rate = sample_rate or self.config.sample_rate
         
+        # Apply noise filtering before VAD analysis
+        filtered_audio = self._apply_noise_filtering(audio_data, sample_rate)
+        
         try:
-            if _vad_type == "silero":
+            if self._vad_type == "silero":
                 # Use Silero VAD
                 speech_timestamps = self._get_speech_timestamps(
-                    audio_data,
+                    filtered_audio,
                     self._model,
                     threshold=self.config.threshold,
                     min_speech_duration_ms=self.config.min_speech_duration_ms,
@@ -202,16 +312,16 @@ class VADService:
                 
                 return segments
                 
-            elif _vad_type == "webrtc":
+            elif self._vad_type == "webrtc":
                 # Use WebRTC VAD
                 import webrtcvad
                 
                 # WebRTC VAD requires 16-bit PCM audio
-                if audio_data.dtype != np.int16:
+                if filtered_audio.dtype != np.int16:
                     # Convert float32 to int16
-                    audio_int16 = (audio_data * 32767).astype(np.int16)
+                    audio_int16 = (filtered_audio * 32767).astype(np.int16)
                 else:
-                    audio_int16 = audio_data
+                    audio_int16 = filtered_audio
                 
                 # WebRTC VAD works on 10ms, 20ms, or 30ms frames
                 frame_duration_ms = 20
@@ -282,7 +392,7 @@ class VADService:
             print(f"⚠️  VAD detection failed: {e}")
             return []
     
-    def has_speech(self, audio_data: np.ndarray, 
+    def _unused_has_speech(self, audio_data: np.ndarray, 
                    sample_rate: Optional[int] = None) -> bool:
         """
         Check if audio contains speech.
@@ -294,29 +404,9 @@ class VADService:
         Returns:
             True if speech is detected, False otherwise
         """
-        segments = self.detect_speech_segments(audio_data, sample_rate)
+        segments = self._detect_speech_segments(audio_data, sample_rate)
         return len(segments) > 0
     
-    def get_speech_ratio(self, audio_data: np.ndarray, 
-                        sample_rate: Optional[int] = None) -> float:
-        """
-        Get the ratio of speech to total audio duration.
-        
-        Args:
-            audio_data: Audio data as numpy array
-            sample_rate: Audio sample rate, uses config default if None
-            
-        Returns:
-            Ratio of speech duration to total duration (0.0-1.0)
-        """
-        segments = self.detect_speech_segments(audio_data, sample_rate)
-        if not segments:
-            return 0.0
-            
-        total_duration = len(audio_data) / (sample_rate or self.config.sample_rate)
-        speech_duration = sum(segment.duration for segment in segments)
-        
-        return speech_duration / total_duration if total_duration > 0 else 0.0
     
     def should_create_chunk(self, audio_data: np.ndarray, 
                           sample_rate: Optional[int] = None,
@@ -340,22 +430,29 @@ class VADService:
         estimated_size_mb = (len(audio_data) * 4) / (1024 * 1024)
         
         # PRIORITY 1: Check if we're approaching 24MB limit (conservative threshold)
-        if estimated_size_mb >= 20.0:  # 20MB threshold to stay under 24MB
+        if estimated_size_mb >= self.config.max_chunk_size_mb:
             return True, f"Approaching 24MB limit ({estimated_size_mb:.1f}MB)"
         
         # PRIORITY 2: Check if we've hit maximum duration
         if max_duration_seconds and duration_seconds >= max_duration_seconds:
             return True, f"Maximum duration reached ({duration_seconds:.1f}s)"
         
+        # Get current audio level
+        audio_rms = np.sqrt(np.mean(audio_data**2))
+        # More practical quiet threshold for real-world environments (AC, background noise)
+        # 0.05 RMS allows for typical background noise while still detecting actual silence
+        is_quiet = audio_rms < 0.05
+        current_time = time.time()
+        
         # If VAD is not available, use enhanced fallback
         if not self._ensure_initialized():
             # Enhanced fallback using multiple audio features
-            audio_rms = np.sqrt(np.mean(audio_data**2))
             audio_max = np.max(np.abs(audio_data))
             audio_std = np.std(audio_data)
             
-            # More sophisticated silence detection
-            is_silence = (audio_rms < 0.001 and audio_max < 0.01 and audio_std < 0.005)
+            # More practical silence detection for real-world environments (AC, background noise)
+            # Relaxed thresholds to handle typical background noise levels
+            is_silence = (audio_rms < 0.03 and audio_max < 0.05 and audio_std < 0.02)
             
             if is_silence:
                 if duration_seconds >= self.config.max_silence_duration_ms / 1000:
@@ -363,29 +460,38 @@ class VADService:
                 return False, "No speech detected (fallback), continuing..."
             
             # Check for very short audio bursts that might be noise
-            if duration_seconds < 0.5 and audio_rms < 0.01:
+            if duration_seconds < 0.5 and audio_rms < 0.05:
                 return False, f"Short audio burst detected (fallback), continuing... (RMS: {audio_rms:.4f})"
             
             return False, f"Audio detected (fallback), continuing... (RMS: {audio_rms:.4f}, Max: {audio_max:.4f})"
         
-        # PRIORITY 3: Check for silence-based chunking using VAD (only if not approaching size limit)
-        segments = self.detect_speech_segments(audio_data, sample_rate)
+        # PRIORITY 3: VAD-based silence detection with state tracking
+        # Use proper VAD to detect speech, not just RMS
+        segments = self._detect_speech_segments(audio_data, sample_rate)
+        has_speech = len(segments) > 0
         
-        if not segments:
-            # No speech detected - check if we have enough silence
-            if duration_seconds >= self.config.max_silence_duration_ms / 1000:
-                return True, f"Silence duration exceeded ({duration_seconds:.1f}s)"
-            return False, "No speech detected, continuing..."
+        if not has_speech:
+            # No speech detected by VAD - start or continue silence tracking
+            if self._silence_start_time is None:
+                self._silence_start_time = current_time
+                return False, f"Silence started, tracking... (VAD: no speech, RMS: {audio_rms:.4f})"
+            
+            # Check if we've had enough silence
+            silence_duration = current_time - self._silence_start_time
+            if silence_duration >= self.config.min_silence_duration_ms / 1000:
+                # Reset silence tracking for next chunk
+                self._silence_start_time = None
+                self._last_audio_time = None
+                return True, f"Silence detected ({silence_duration:.1f}s, VAD: no speech, RMS: {audio_rms:.4f})"
+            
+            return False, f"Silence continuing... ({silence_duration:.1f}s, VAD: no speech, RMS: {audio_rms:.4f})"
         
-        # Check if there's been silence at the end (only if we're not close to size limit)
-        last_segment = segments[-1]
-        silence_at_end = duration_seconds - last_segment.end_time
-        
-        # Only create chunk based on silence if we're not approaching the size limit
-        if silence_at_end >= self.config.min_silence_duration_ms / 1000 and estimated_size_mb < 15.0:
-            return True, f"Silence detected at end ({silence_at_end:.1f}s)"
-        
-        return False, f"Active speech detected, continuing... (last speech: {last_segment.end_time:.1f}s ago, size: {estimated_size_mb:.1f}MB)"
+        else:
+            # Speech detected by VAD - reset silence tracking and update last audio time
+            if self._silence_start_time is not None:
+                self._silence_start_time = None  # Reset silence tracking
+            self._last_audio_time = current_time
+            return False, f"Speech detected, continuing... (VAD: {len(segments)} segments, RMS: {audio_rms:.4f}, {duration_seconds:.1f}s, {estimated_size_mb:.1f}MB)"
     
     def get_audio_level(self, audio_data: np.ndarray) -> float:
         """

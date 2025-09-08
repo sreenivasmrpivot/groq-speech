@@ -55,7 +55,7 @@ USAGE EXAMPLES:
 """
 
 from typing import Optional
-from .property_id import PropertyId
+# PropertyId removed - using string constants directly
 from .config import Config
 
 
@@ -151,9 +151,9 @@ class SpeechConfig:
         - Timestamp granularity settings
         """
         # Set speech processing defaults
-        self.set_property(PropertyId.Speech_SegmentationStrategy, "Silence")
-        self.set_property(PropertyId.Speech_LogFilename, "")
-        self.set_property(PropertyId.Speech_ServiceConnection_LogFilename, "")
+        self.set_property("Speech_SegmentationStrategy", "Silence")
+        self.set_property("Speech_LogFilename", "")
+        self.set_property("Speech_ServiceConnection_LogFilename", "")
 
         # Get model configuration from environment
         # This ensures consistency with the main configuration system
@@ -162,26 +162,26 @@ class SpeechConfig:
         # Set Groq API properties from environment config
         # These control the AI model behavior and response format
         self.set_property(
-            PropertyId.Speech_Recognition_GroqModelId, model_config["model_id"]
+            "Speech_Recognition_GroqModelId", model_config["model_id"]
         )
         self.set_property(
-            PropertyId.Speech_Recognition_ResponseFormat,
+            "Speech_Recognition_ResponseFormat",
             model_config["response_format"],
         )
-        temp_prop = PropertyId.Speech_Recognition_Temperature
+        temp_prop = "Speech_Recognition_Temperature"
         self.set_property(temp_prop, str(model_config["temperature"]))
-        word_timestamps_prop = PropertyId.Speech_Recognition_EnableWordLevelTimestamps
+        word_timestamps_prop = "Speech_Recognition_EnableWordLevelTimestamps"
         self.set_property(
             word_timestamps_prop,
             str(model_config["enable_word_timestamps"]).lower(),
         )
-        segment_timestamps_prop = PropertyId.Speech_Recognition_EnableSegmentTimestamps
+        segment_timestamps_prop = "Speech_Recognition_EnableSegmentTimestamps"
         self.set_property(
             segment_timestamps_prop,
             str(model_config["enable_segment_timestamps"]).lower(),
         )
 
-    def set_property(self, property_id: PropertyId, value: str):
+    def set_property(self, property_id: str, value: str):
         """
         Set a configuration property for custom behavior.
 
@@ -201,7 +201,7 @@ class SpeechConfig:
         """
         self._properties[property_id] = value
 
-    def get_property(self, property_id: PropertyId) -> str:
+    def get_property(self, property_id: str) -> str:
         """
         Get a configuration property value.
 

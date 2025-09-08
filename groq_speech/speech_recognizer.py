@@ -60,161 +60,21 @@ USAGE EXAMPLES:
 import time
 import threading
 import io
-from abc import ABC, abstractmethod
-from typing import Optional, Callable, List, Dict, Any, Union, Protocol
+from typing import Optional, Callable, List, Dict, Any, Union
 import numpy as np
 import soundfile as sf  # type: ignore
 import groq
 from .speech_config import SpeechConfig
-from .audio_processor import OptimizedAudioProcessor, AudioChunker
-from .result_reason import ResultReason, CancellationReason
+from .result_reason import ResultReason
 from .config import Config
-from .property_id import PropertyId
 from .speaker_diarization import DiarizationResult
 from .vad_service import VADConfig, VADService
-
-
-# ============================================================================
-# INTERFACES AND PROTOCOLS (Dependency Inversion Principle)
-# ============================================================================
-
-class AudioProcessorInterface(Protocol):
-    """Interface for audio processing operations."""
-    
-    def preprocess(self, audio_data: np.ndarray) -> np.ndarray:
-        """Preprocess audio data for API requirements."""
-        ...
-    
-    def chunk_audio(self, audio_data: np.ndarray) -> List[np.ndarray]:
-        """Chunk audio data for processing."""
-        ...
-
-
-class APIClientInterface(Protocol):
-    """Interface for API communication."""
-    
-    def transcribe(self, audio_buffer: io.BytesIO) -> Any:
-        """Transcribe audio using Groq API."""
-        ...
-    
-    def translate(self, audio_buffer: io.BytesIO) -> Any:
-        """Translate audio using Groq API."""
-        ...
-
-
-class DiarizationServiceInterface(Protocol):
-    """Interface for diarization services."""
-    
-    def diarize_audio(self, audio_data: np.ndarray, sample_rate: int, 
-                     is_translation: bool = False) -> DiarizationResult:
-        """Perform speaker diarization on audio data."""
-        ...
-    
-    def diarize_file(self, audio_file: str, mode: str) -> DiarizationResult:
-        """Perform speaker diarization on audio file."""
-        ...
-
-
-class EventManagerInterface(Protocol):
-    """Interface for event management."""
-    
-    def connect(self, event_type: str, handler: Callable) -> None:
-        """Connect an event handler."""
-        ...
-    
-    def trigger(self, event_type: str, event_data: Any) -> None:
-        """Trigger an event."""
-        ...
 
 
 # ============================================================================
 # CORE DATA CLASSES (Single Responsibility Principle)
 # ============================================================================
 
-class TimingMetrics:
-    """Timing metrics for transcription pipeline - O(1) operations."""
-    
-    def __init__(self):
-        """Initialize timing metrics with all timestamps set to None."""
-        self._timestamps = {
-            'microphone_start': None,
-            'microphone_end': None,
-            'api_call_start': None,
-            'api_call_end': None,
-            'processing_start': None,
-            'processing_end': None,
-            'total_start': None,
-            'total_end': None
-        }
-    
-    def start_microphone(self) -> None:
-        """Start microphone timing and set total start time if not already set."""
-        current_time = time.time()
-        self._timestamps['microphone_start'] = current_time
-        if not self._timestamps['total_start']:
-            self._timestamps['total_start'] = current_time
-    
-    def end_microphone(self) -> None:
-        """End microphone timing."""
-        self._timestamps['microphone_end'] = time.time()
-    
-    def start_api_call(self) -> None:
-        """Start API call timing."""
-        self._timestamps['api_call_start'] = time.time()
-    
-    def end_api_call(self) -> None:
-        """End API call timing."""
-        self._timestamps['api_call_end'] = time.time()
-    
-    def start_processing(self) -> None:
-        """Start response processing timing."""
-        self._timestamps['processing_start'] = time.time()
-    
-    def end_processing(self) -> None:
-        """End response processing timing and set total end time."""
-        current_time = time.time()
-        self._timestamps['processing_end'] = current_time
-        self._timestamps['total_end'] = current_time
-    
-    def get_metrics(self) -> Dict[str, float]:
-        """
-        Get all timing metrics as a dictionary - O(1) operation.
-        
-        Returns:
-            Dictionary containing timing measurements for each pipeline stage.
-        """
-        metrics = {}
-        
-        # Calculate durations only for completed measurements
-        if (self._timestamps['microphone_start'] and 
-            self._timestamps['microphone_end']):
-            metrics["microphone_capture"] = (
-                self._timestamps['microphone_end'] - 
-                self._timestamps['microphone_start']
-            )
-        
-        if (self._timestamps['api_call_start'] and 
-            self._timestamps['api_call_end']):
-            metrics["api_call"] = (
-                self._timestamps['api_call_end'] - 
-                self._timestamps['api_call_start']
-            )
-        
-        if (self._timestamps['processing_start'] and 
-            self._timestamps['processing_end']):
-            metrics["response_processing"] = (
-                self._timestamps['processing_end'] - 
-                self._timestamps['processing_start']
-            )
-        
-        if (self._timestamps['total_start'] and 
-            self._timestamps['total_end']):
-            metrics["total_time"] = (
-                self._timestamps['total_end'] - 
-                self._timestamps['total_start']
-            )
-        
-        return metrics
 
 
 class SpeechRecognitionResult:
@@ -226,20 +86,14 @@ class SpeechRecognitionResult:
         reason: ResultReason = ResultReason.NoMatch,
         confidence: float = 0.0,
         language: str = "",
-        cancellation_details: Optional["CancellationDetails"] = None,
-        no_match_details: Optional["NoMatchDetails"] = None,
         timestamps: Optional[List[Dict[str, Any]]] = None,
-        timing_metrics: Optional[TimingMetrics] = None,
     ):
         """Initialize speech recognition result."""
         self.text = text
         self.reason = reason
         self.confidence = confidence
         self.language = language
-        self.cancellation_details = cancellation_details
-        self.no_match_details = no_match_details
         self.timestamps = timestamps or []
-        self.timing_metrics = timing_metrics
     
     def __str__(self) -> str:
         """String representation for debugging and logging."""
@@ -255,90 +109,12 @@ class SpeechRecognitionResult:
         return bool(self.text and self.text.strip())
 
 
-class CancellationDetails:
-    """Details about why speech recognition was canceled."""
-    
-    def __init__(self, reason: CancellationReason, error_details: str = ""):
-        """Initialize cancellation details."""
-        self.reason = reason
-        self.error_details = error_details
-
-
-class NoMatchDetails:
-    """Details about why no speech was recognized."""
-    
-    def __init__(self, reason: str = "NoMatch", error_details: str = ""):
-        """Initialize no match details."""
-        self.reason = reason
-        self.error_details = error_details
 
 
 # ============================================================================
 # SERVICE CLASSES (Single Responsibility Principle)
 # ============================================================================
 
-class AudioProcessor:
-    """Handles audio preprocessing and optimization - O(n) operations."""
-    
-    def __init__(self, sample_rate: int = 16000):
-        """Initialize audio processor."""
-        self.sample_rate = sample_rate
-        self._cache = {}  # Simple cache for processed audio
-    
-    def preprocess(self, audio_data: np.ndarray) -> np.ndarray:
-        """
-        Preprocess audio data for Groq API requirements - O(n) operation.
-        
-        Args:
-            audio_data: Input audio data as numpy array
-            
-        Returns:
-            Preprocessed audio data ready for API submission
-        """
-        # Check cache first - O(1) lookup
-        cache_key = hash(audio_data.tobytes())
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        
-        # Ensure audio is mono (Groq API requirement) - O(n)
-        if len(audio_data.shape) > 1 and audio_data.shape[1] > 1:
-            audio_data = np.mean(audio_data, axis=1)
-        
-        # Resample to 16kHz if needed - O(n)
-        if self.sample_rate != 16000:
-            ratio = 16000 / self.sample_rate
-            new_length = int(len(audio_data) * ratio)
-            audio_data = np.interp(
-                np.linspace(0, len(audio_data), new_length),
-                np.arange(len(audio_data)),
-                audio_data,
-            )
-        
-        # Cache the result - O(1) insertion
-        self._cache[cache_key] = audio_data
-        return audio_data
-    
-    def chunk_audio(self, audio_data: np.ndarray, 
-                   chunk_duration: float = 30.0) -> List[np.ndarray]:
-        """
-        Chunk audio data for processing - O(n) operation.
-        
-        Args:
-            audio_data: Input audio data
-            chunk_duration: Duration of each chunk in seconds
-            
-        Returns:
-            List of audio chunks
-        """
-        chunk_size = int(chunk_duration * self.sample_rate)
-        chunks = []
-        
-        for i in range(0, len(audio_data), chunk_size):
-            chunk = audio_data[i:i + chunk_size]
-            if len(chunk) > 0:
-                chunks.append(chunk)
-        
-        return chunks
 
 
 class GroqAPIClient:
@@ -389,7 +165,7 @@ class GroqAPIClient:
         temperature = self._model_config["temperature"]
         
         prompt = (
-            self.speech_config.get_property(PropertyId.Speech_Recognition_Prompt)
+            self.speech_config.get_property("Speech_Recognition_Prompt")
             or None
         )
         
@@ -423,7 +199,7 @@ class GroqAPIClient:
         temperature = self._model_config["temperature"]
         
         prompt = (
-            self.speech_config.get_property(PropertyId.Speech_Recognition_Prompt)
+            self.speech_config.get_property("Speech_Recognition_Prompt")
             or None
         )
         
@@ -497,10 +273,7 @@ class ResponseParser:
         except Exception as e:
             return SpeechRecognitionResult(
                 reason=ResultReason.Canceled,
-                cancellation_details=CancellationDetails(
-                    CancellationReason.Error, 
-                    f"Failed to parse API response: {str(e)}"
-                ),
+                text=f"Failed to parse API response: {str(e)}"
             )
     
     def _extract_language(self, response: Any, is_translation: bool) -> str:
@@ -608,42 +381,6 @@ class DiarizationService:
         except ImportError:
             self._diarizer = None
     
-    def diarize_audio(self, audio_data: np.ndarray, sample_rate: int, 
-                     is_translation: bool = False) -> DiarizationResult:
-        """
-        Perform speaker diarization on audio data - O(n log n) operation.
-        
-        Args:
-            audio_data: Input audio data
-            sample_rate: Sample rate of the audio
-            is_translation: Whether to translate or transcribe
-            
-        Returns:
-            DiarizationResult with speaker segments
-        """
-        if not self._diarizer:
-            self._initialize_diarizer()
-        
-        if not self._diarizer:
-            return self._create_fallback_result(audio_data, sample_rate, is_translation)
-        
-        try:
-            # Check if diarization is available
-            if not hasattr(self._diarizer.base_diarizer, "_pipeline") or \
-               self._diarizer.base_diarizer._pipeline is None:
-                return self._create_fallback_result(audio_data, sample_rate, is_translation)
-            
-            # Perform diarization - O(n log n) operation
-            result = self._diarizer.diarize_audio(audio_data, sample_rate, is_translation, None)
-            
-            if not result.is_successful:
-                return self._create_fallback_result(audio_data, sample_rate, is_translation)
-            
-            return result
-        
-        except Exception as e:
-            print(f"⚠️  Diarization failed: {e}, falling back to basic transcription...")
-            return self._create_fallback_result(audio_data, sample_rate, is_translation)
     
     def diarize_file(self, audio_file: str, mode: str) -> DiarizationResult:
         """
@@ -668,96 +405,24 @@ class DiarizationService:
             return result
         except Exception as e:
             print(f"❌ Diarization failed: {e}")
-            return self._create_fallback_file_result(audio_file, mode)
-    
-    def _create_fallback_result(self, audio_data: np.ndarray, sample_rate: int, 
-                               is_translation: bool) -> DiarizationResult:
-        """Create fallback result when diarization is not available - O(1) operation."""
-        from .speaker_diarization import SpeakerSegment, DiarizationResult
-        
-        # Create a single speaker segment
-        segment = SpeakerSegment(
-            start_time=0.0,
-            end_time=len(audio_data) / sample_rate,
-            speaker_id="speaker_1",
-            text="[Basic transcription/translation]",
-            transcription_confidence=0.95,
-        )
-        
-        return DiarizationResult(
-            segments=[segment],
-            speaker_mapping={"speaker_1": "Speaker"},
-            total_duration=len(audio_data) / sample_rate,
-            num_speakers=1,
-            overall_confidence=0.95,
-            processing_time=0.0,
-        )
-    
-    def _create_fallback_file_result(self, audio_file: str, mode: str) -> DiarizationResult:
-        """Create fallback result for file processing - O(1) operation."""
-        from .speaker_diarization import SpeakerSegment, DiarizationResult
-        
-        # Create a single speaker segment
-        segment = SpeakerSegment(
-            start_time=0.0,
-            end_time=0.0,  # Will be updated when audio is loaded
-            speaker_id="speaker_1",
-            text="[Basic transcription/translation]",
-            transcription_confidence=0.95,
-        )
-        
-        return DiarizationResult(
-            segments=[segment],
-            speaker_mapping={"speaker_1": "Speaker"},
-            total_duration=0.0,
-            num_speakers=1,
-            overall_confidence=0.95,
-            processing_time=0.0,
-        )
-
-
-class PerformanceTracker:
-    """Tracks performance metrics and statistics - O(1) operations."""
-    
-    def __init__(self):
-        """Initialize performance tracker."""
-        self._stats = {
-            "total_requests": 0,
-            "total_processing_time": 0.0,
-            "avg_response_time": 0.0,
-            "successful_recognitions": 0,
-            "failed_recognitions": 0,
-        }
-        self._lock = threading.Lock()
-    
-    def record_request(self) -> None:
-        """Record a new request - O(1) operation."""
-        with self._lock:
-            self._stats["total_requests"] += 1
-    
-    def record_success(self) -> None:
-        """Record a successful recognition - O(1) operation."""
-        with self._lock:
-            self._stats["successful_recognitions"] += 1
-    
-    def record_failure(self) -> None:
-        """Record a failed recognition - O(1) operation."""
-        with self._lock:
-            self._stats["failed_recognitions"] += 1
-    
-    def record_processing_time(self, processing_time: float) -> None:
-        """Record processing time - O(1) operation."""
-        with self._lock:
-            self._stats["total_processing_time"] += processing_time
-            self._stats["avg_response_time"] = (
-                self._stats["total_processing_time"] / 
-                max(self._stats["total_requests"], 1)
+            # Create a simple fallback result
+            from .speaker_diarization import SpeakerSegment, DiarizationResult
+            segment = SpeakerSegment(
+                start_time=0.0,
+                end_time=1.0,
+                speaker_id="SPEAKER_00",
+                text="[Diarization failed]"
+            )
+            return DiarizationResult(
+                segments=[segment],
+                speaker_mapping={"SPEAKER_00": "Speaker 1"},
+                total_duration=1.0,
+                num_speakers=1,
+                overall_confidence=0.5
             )
     
-    def get_stats(self) -> Dict[str, Any]:
-        """Get performance statistics - O(1) operation."""
-        with self._lock:
-            return self._stats.copy()
+
+
 
 
 # ============================================================================
@@ -802,35 +467,17 @@ class SpeechRecognizer:
         self.translation_target_language = translation_target_language
         
         # Initialize services (Dependency Injection)
-        self.audio_processor = AudioProcessor(sample_rate)
         self.api_client = GroqAPIClient(speech_config.api_key, speech_config)
         self.response_parser = ResponseParser(speech_config)
         self._diarization_service = None  # Lazy-loaded only when needed
         self.event_manager = EventManager()
-        self.performance_tracker = PerformanceTracker()
         
         # Initialize VAD service for intelligent chunking
         self.vad_config = VADConfig(sample_rate=sample_rate)
         self.vad_service = VADService(self.vad_config)
         
-        # Initialize audio processor and chunker
-        audio_config_dict = Config.get_audio_config()
-        self.audio_processor_advanced = OptimizedAudioProcessor(
-            sample_rate=audio_config_dict["sample_rate"],
-            channels=audio_config_dict["channels"],
-            chunk_duration=audio_config_dict["chunk_duration"],
-            buffer_size=audio_config_dict["buffer_size"],
-            enable_vad=audio_config_dict["vad_enabled"],
-            enable_compression=audio_config_dict["enable_compression"],
-        )
         
-        self.audio_chunker = AudioChunker(
-            chunk_duration=30.0,
-            overlap_duration=2.0,
-            sample_rate=audio_config_dict["sample_rate"],
-        )
-        
-        # Continuous recognition state
+        # Continuous recognition state (used by API)
         self._is_recognizing = False
         self._recognition_thread = None
         self._stop_recognition = False
@@ -854,7 +501,7 @@ class SpeechRecognizer:
         self.event_manager.connect(event_type, handler)
     
     def recognize_audio_data(
-        self, audio_data: np.ndarray, is_translation: bool = False
+        self, audio_data: np.ndarray, sample_rate: int = 16000, is_translation: bool = False
     ) -> SpeechRecognitionResult:
         """
         Recognize speech from audio data using Groq API - O(n) operation.
@@ -866,15 +513,27 @@ class SpeechRecognizer:
         Returns:
             SpeechRecognitionResult with recognition data and timing metrics
         """
-        timing_metrics = TimingMetrics()
-        self.performance_tracker.record_request()
+        # Start processing
         
         try:
-            # Start API call timing
-            timing_metrics.start_api_call()
-            
             # Preprocess audio - O(n)
-            audio_data = self.audio_processor.preprocess(audio_data)
+            # Ensure audio is mono (Groq API requirement)
+            if len(audio_data.shape) > 1 and audio_data.shape[1] > 1:
+                audio_data = np.mean(audio_data, axis=1)
+
+            # Resample to 16kHz if needed
+            if sample_rate != 16000:
+                ratio = 16000 / sample_rate
+                new_length = int(len(audio_data) * ratio)
+                audio_data = np.interp(
+                    np.linspace(0, len(audio_data), new_length),
+                    np.arange(len(audio_data)),
+                    audio_data,
+                )
+            
+            # Apply noise filtering for better recognition quality
+            if hasattr(self, 'vad_service') and self.vad_service:
+                audio_data = self.vad_service._apply_noise_filtering(audio_data, 16000)
             
             # Save audio to temporary buffer - O(n)
             buffer = io.BytesIO()
@@ -887,50 +546,23 @@ class SpeechRecognizer:
             else:
                 response = self.api_client.transcribe(buffer)
             
-            # End API call timing
-            timing_metrics.end_api_call()
-            
-            # Start processing timing
-            timing_metrics.start_processing()
-            
             # Parse API response - O(n)
             if is_translation:
                 result = self.response_parser.parse_translation_response(response)
             else:
                 result = self.response_parser.parse_transcription_response(response)
-            
-            # End processing timing
-            timing_metrics.end_processing()
-            
-            # Add timing metrics to result
-            result.timing_metrics = timing_metrics
-            
-            # Update performance stats
-            if result.is_successful():
-                self.performance_tracker.record_success()
-            else:
-                self.performance_tracker.record_failure()
-            
-            processing_time = timing_metrics.get_metrics().get("total_time", 0.0)
-            self.performance_tracker.record_processing_time(processing_time)
-            
+
             return result
         
         except Exception as e:
-            timing_metrics.end_processing()
-            self.performance_tracker.record_failure()
-            
             return SpeechRecognitionResult(
                 reason=ResultReason.Canceled,
-                cancellation_details=CancellationDetails(
-                    CancellationReason.Error, f"Recognition failed: {str(e)}"
-                ),
-                timing_metrics=timing_metrics,
+                text=f"Recognition failed: {str(e)}"
             )
     
-    def translate_audio_data(self, audio_data: np.ndarray) -> SpeechRecognitionResult:
+    def translate_audio_data(self, audio_data: np.ndarray, sample_rate: int = 16000) -> SpeechRecognitionResult:
         """Translate audio to English text using Groq API."""
-        return self.recognize_audio_data(audio_data, is_translation=True)
+        return self.recognize_audio_data(audio_data, sample_rate, is_translation=True)
     
     def recognize_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]:
         """
@@ -948,7 +580,7 @@ class SpeechRecognizer:
         else:
             # Load audio file and process directly without diarization
             audio_data, sample_rate = sf.read(audio_file)
-            return self.recognize_audio_data(audio_data)
+            return self.recognize_audio_data(audio_data, sample_rate)
     
     def translate_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]:
         """
@@ -966,73 +598,10 @@ class SpeechRecognizer:
         else:
             # Load audio file and process directly without diarization
             audio_data, sample_rate = sf.read(audio_file)
-            return self.translate_audio_data(audio_data)
+            return self.translate_audio_data(audio_data, sample_rate)
     
-    def recognize_microphone_single(self, enable_diarization: bool = False) -> Union[SpeechRecognitionResult, DiarizationResult]:
-        """
-        Single-shot microphone recognition - O(n) operation.
-        
-        Args:
-            enable_diarization: Whether to use diarization
-            
-        Returns:
-            SpeechRecognitionResult or DiarizationResult
-        """
-        # This is a placeholder - actual implementation would handle microphone input
-        # For now, return a basic result
-        return SpeechRecognitionResult(
-            text="[Microphone recognition not implemented]",
-            reason=ResultReason.NoMatch,
-            no_match_details=NoMatchDetails("Microphone recognition not implemented")
-        )
     
-    def recognize_microphone_continuous(self, enable_diarization: bool = False) -> Union[SpeechRecognitionResult, DiarizationResult]:
-        """
-        Continuous microphone recognition - O(n) operation.
-        
-        Args:
-            enable_diarization: Whether to use diarization
-            
-        Returns:
-            SpeechRecognitionResult or DiarizationResult
-        """
-        # This is a placeholder - actual implementation would handle continuous microphone input
-        # For now, return a basic result
-        return SpeechRecognitionResult(
-            text="[Continuous microphone recognition not implemented]",
-            reason=ResultReason.NoMatch,
-            no_match_details=NoMatchDetails("Continuous microphone recognition not implemented")
-        )
     
-    def recognize_once_async(self) -> SpeechRecognitionResult:
-        """Perform single-shot speech recognition."""
-        try:
-            # Trigger session started event
-            self.event_manager.trigger(
-                "session_started", {"session_id": f"session_{int(time.time())}"}
-            )
-            
-            # For now, return a placeholder result
-            result = SpeechRecognitionResult(
-                text="[Async recognition not implemented]",
-                reason=ResultReason.NoMatch,
-                no_match_details=NoMatchDetails("Async recognition not implemented")
-            )
-            
-            # Trigger session stopped event
-            self.event_manager.trigger(
-                "session_stopped", {"session_id": f"session_{int(time.time())}"}
-            )
-            
-            return result
-        
-        except Exception as e:
-            return SpeechRecognitionResult(
-                reason=ResultReason.Canceled,
-                cancellation_details=CancellationDetails(
-                    CancellationReason.Error, f"Recognition failed: {str(e)}"
-                )
-            )
     
     def start_continuous_recognition(self) -> None:
         """Start continuous speech recognition."""
@@ -1057,16 +626,6 @@ class SpeechRecognizer:
         """Check if recognition is currently active."""
         return self._is_recognizing
     
-    def get_performance_stats(self) -> Dict[str, Any]:
-        """Get comprehensive performance statistics."""
-        audio_stats = self.audio_processor_advanced.get_performance_stats()
-        
-        return {
-            **self.performance_tracker.get_stats(),
-            "audio_processing": audio_stats,
-            "model_config": Config.get_model_config(),
-            "audio_config": Config.get_audio_config(),
-        }
     
     # ========================================================================
     # PRIVATE METHODS
@@ -1092,22 +651,3 @@ class SpeechRecognizer:
         """Process audio file with enhanced diarization."""
         return self.diarization_service.diarize_file(audio_file, mode)
     
-    # ========================================================================
-    # COMPATIBILITY METHODS (for speech_demo.py)
-    # ========================================================================
-    
-    def recognize_once(self) -> SpeechRecognitionResult:
-        """Perform single-shot speech recognition (synchronous)."""
-        return self.recognize_once_async()
-    
-    def _recognize_from_microphone(self) -> SpeechRecognitionResult:
-        """Recognize speech from microphone input (legacy method)."""
-        return SpeechRecognitionResult(
-            text="[Microphone recognition not implemented]",
-            reason=ResultReason.NoMatch,
-            no_match_details=NoMatchDetails("Microphone recognition not implemented")
-        )
-    
-    def _trigger_event(self, event_type: str, event_data: Any) -> None:
-        """Trigger event handlers (legacy method)."""
-        self.event_manager.trigger(event_type, event_data)

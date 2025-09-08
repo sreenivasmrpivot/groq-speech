@@ -129,9 +129,9 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
 
                 # Use the correct method
                 if mode == "translation":
-                    basic_result = recognizer.translate_audio_data(audio_data)
+                    basic_result = recognizer.translate_audio_data(audio_data, sample_rate)
                 else:
-                    basic_result = recognizer.recognize_audio_data(audio_data)
+                    basic_result = recognizer.recognize_audio_data(audio_data, sample_rate)
 
                 if basic_result and basic_result.text:
                     print(f"✅ Basic {mode} completed: {basic_result.text[:200]}...")
@@ -168,7 +168,7 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
         import tempfile
 
         # Audio recording parameters
-        CHUNK = 1024
+        CHUNK = 8192  # Further increased buffer size to prevent overflow
         FORMAT = pyaudio.paFloat32
         CHANNELS = 1
         RATE = 16000
@@ -216,10 +216,23 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
                 current_audio = np.frombuffer(b"".join(current_chunk_frames), dtype=np.float32)
                 duration = len(current_audio) / RATE
                 
+                # Visual feedback with progress bar
+                current_time = time.time()
+                if current_time - last_visual_update >= visual_update_interval:
+                    audio_level = recognizer.vad_service.get_audio_level(current_audio[-RATE:])  # Last 1 second
+                    level_bars = "█" * int(audio_level * 20) + "░" * (20 - int(audio_level * 20))
+                    estimated_size_mb = (len(current_audio) * 4) / (1024 * 1024)  # 32-bit float = 4 bytes
+                    print(f"\r🎤 Listening... [{level_bars}] {audio_level:.2f} | {duration:.1f}s | {estimated_size_mb:.1f}MB", end="", flush=True)
+                    last_visual_update = current_time
+                
                # Check if we should create a chunk using VAD
                 should_create, reason = recognizer.vad_service.should_create_chunk(
                     current_audio, RATE, MAX_DURATION_SECONDS
                 )
+                
+                # Debug logging
+                if duration > 5.0:  # Only log after 5 seconds to avoid spam
+                    print(f"\n🔍 DEBUG: Duration={duration:.1f}s, Size={estimated_size_mb:.1f}MB, ShouldCreate={should_create}, Reason={reason}")
                 
                 if should_create:
                     chunk_count += 1
@@ -295,9 +308,9 @@ def _process_audio_chunk(audio_data, sample_rate, mode, recognizer, enable_diari
             else:
                 # Direct processing without diarization
                 if mode == "translation":
-                    result = recognizer.translate_audio_data(audio_data)
+                    result = recognizer.translate_audio_data(audio_data, sample_rate)
                 else:
-                    result = recognizer.recognize_audio_data(audio_data)
+                    result = recognizer.recognize_audio_data(audio_data, sample_rate)
 
             if result and hasattr(result, "text") and result.text:
                 print(f"✅ {mode.title()} completed successfully!")
@@ -399,7 +412,7 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
         import time
 
         # Audio recording parameters
-        CHUNK = 1024
+        CHUNK = 8192  # Further increased buffer size to prevent overflow
         FORMAT = pyaudio.paFloat32
         CHANNELS = 1
         RATE = 16000
@@ -458,8 +471,12 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
 
         try:
             while True:  # Continuous loop until Ctrl+C
-                # Read audio data continuously
-                data = stream.read(CHUNK)
+                # Read audio data continuously with error handling
+                try:
+                    data = stream.read(CHUNK, exception_on_overflow=False)
+                except Exception as e:
+                    print(f"⚠️  Audio read error: {e}, continuing...")
+                    continue
                 
                 # Add raw bytes to accumulated audio (more efficient)
                 accumulated_audio.append(data)
@@ -566,9 +583,9 @@ def _process_continuous_audio_chunk_async(audio_data, sample_rate, mode, recogni
             else:
                 # Direct processing without diarization
                 if mode == "translation":
-                    result = recognizer.translate_audio_data(audio_data)
+                    result = recognizer.translate_audio_data(audio_data, sample_rate)
                 else:
-                    result = recognizer.recognize_audio_data(audio_data)
+                    result = recognizer.recognize_audio_data(audio_data, sample_rate)
 
             if result and hasattr(result, "text") and result.text and len(result.text.strip()) > 0:
                 segment_info = f"Segment {segment_num}" if segment_num else "Audio"
@@ -690,7 +707,7 @@ EXAMPLES:
             # print(f"🎯 Operation: {args.operation}")
             if hasattr(result, "segments"):
                 print(f"🎭 Speakers: {result.num_speakers}")
-                print(f"📊 Speaker Segment Groupss: {len(result.segments)}")
+                print(f"📊 Speaker Segment Groups: {len(result.segments)}")
                 for i, segment in enumerate(result.segments):
                     speaker = segment.speaker_id
                     text = (

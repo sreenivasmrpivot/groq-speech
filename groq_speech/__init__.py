@@ -67,7 +67,7 @@ USAGE EXAMPLES:
 from .speech_config import SpeechConfig
 from .speech_recognizer import SpeechRecognizer, SpeechRecognitionResult
 from .result_reason import ResultReason, CancellationReason
-from .property_id import PropertyId
+# PropertyId removed - using string constants directly
 from .config import Config, get_config
 from .speaker_diarization import DiarizationConfig, SpeakerSegment, DiarizationResult, Diarizer
 
