@@ -19,6 +19,45 @@ import sys
 import os
 from pathlib import Path
 import time
+import warnings
+
+
+# Global verbose flag for logging control
+VERBOSE_MODE = False
+
+def configure_warnings(verbose: bool = False):
+    """Configure warning display based on verbose mode."""
+    if not verbose:
+        # Suppress PyTorch/TorchAudio deprecation warnings in production mode
+        warnings.filterwarnings("ignore", category=UserWarning, module="torchaudio")
+        warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+        warnings.filterwarnings("ignore", category=UserWarning, module="speechbrain")
+        warnings.filterwarnings("ignore", message=".*torchaudio.*")
+        warnings.filterwarnings("ignore", message=".*TorchCodec.*")
+    else:
+        # Show all warnings in verbose mode
+        warnings.resetwarnings()
+
+def log_debug(message: str):
+    """Log debug message only in verbose mode."""
+    if VERBOSE_MODE:
+        print(f"🔍 {message}")
+
+def log_info(message: str):
+    """Log info message always."""
+    print(f"ℹ️  {message}")
+
+def log_success(message: str):
+    """Log success message always."""
+    print(f"✅ {message}")
+
+def log_warning(message: str):
+    """Log warning message always."""
+    print(f"⚠️  {message}")
+
+def log_error(message: str):
+    """Log error message always."""
+    print(f"❌ {message}")
 
 
 # Add the parent directory to the path to import groq_speech
@@ -70,7 +109,7 @@ def validate_environment(enable_diarization: bool = False):
     return True
 
 
-def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = True):
+def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = True, verbose: bool = False):
     """
     Process audio file with diarization pipeline.
 
@@ -83,6 +122,10 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
     
     if enable_diarization:
         print("🎭 Diarization Pipeline: Pyannote.audio FIRST, then Groq API per segment")
+        log_debug("Running CORRECT diarization pipeline...")
+        log_debug("1. Pyannote.audio → Speaker detection")
+        log_debug("2. Audio chunking → Speaker-specific segments") 
+        log_debug("3. Groq API → Accurate transcription per segment")
     else:
         print("🎯 Direct Pipeline: Groq API processing without diarization")
 
@@ -151,8 +194,8 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
         print(f"❌ File processing failed: {e}")
         return None
 
-def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False):
-    """Single-shot microphone transcription with 24MB chunking for long recordings."""
+def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False, verbose: bool = False):
+    """Simple single-shot microphone recording - record until Ctrl+C, then process everything."""
     print(f"\n🎤 Single Microphone {mode.title()}")
     print("=" * 50)
     if enable_diarization:
@@ -168,23 +211,13 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
         import tempfile
 
         # Audio recording parameters
-        CHUNK = 8192  # Further increased buffer size to prevent overflow
+        CHUNK = 8192
         FORMAT = pyaudio.paFloat32
         CHANNELS = 1
         RATE = 16000
-        
-        # 24MB limit calculation for 16kHz, 32-bit float audio
-        # 24MB = 25,165,824 bytes
-        # 32-bit float = 4 bytes per sample
-        # Max samples = 25,165,824 / 4 = 6,291,456 samples
-        # Max duration = 6,291,456 / 16,000 ≈ 393 seconds ≈ 6.5 minutes
-        MAX_DURATION_SECONDS = 390  # Conservative 6.5 minutes
-        MAX_SAMPLES = int(RATE * MAX_DURATION_SECONDS)
-        BYTES_PER_SAMPLE = 4  # 32-bit float
 
         print("🎤 Recording started - speak naturally...")
         print("💡 Press Ctrl+C when you want to stop recording and process the audio")
-        print(f"💡 Audio will be automatically chunked every {MAX_DURATION_SECONDS/60:.1f} minutes to stay under 24MB limit")
 
         p = pyaudio.PyAudio()
         stream = p.open(
@@ -196,63 +229,29 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
         )
 
         all_frames = []
-        chunk_count = 0
-        current_chunk_frames = []
-        current_chunk_samples = 0
-
         print("🎤 Recording... Press Ctrl+C to stop")
 
+        # Simple visual feedback
         last_visual_update = time.time()
-        visual_update_interval = 0.5  # Update visual feedback every 0.5 seconds
+        visual_update_interval = 1.0  # Update every second
 
         try:
-            # Record continuously until user interrupts
+            # Simple recording loop - just record until Ctrl+C
             while True:
                 data = stream.read(CHUNK)
-                current_chunk_frames.append(data)
-                current_chunk_samples += CHUNK
+                all_frames.append(data)
                 
-                # Convert current audio to numpy for VAD analysis
-                current_audio = np.frombuffer(b"".join(current_chunk_frames), dtype=np.float32)
-                duration = len(current_audio) / RATE
-                
-                # Visual feedback with progress bar
+                # Simple visual feedback
                 current_time = time.time()
                 if current_time - last_visual_update >= visual_update_interval:
-                    audio_level = recognizer.vad_service.get_audio_level(current_audio[-RATE:])  # Last 1 second
-                    level_bars = "█" * int(audio_level * 20) + "░" * (20 - int(audio_level * 20))
-                    estimated_size_mb = (len(current_audio) * 4) / (1024 * 1024)  # 32-bit float = 4 bytes
-                    print(f"\r🎤 Listening... [{level_bars}] {audio_level:.2f} | {duration:.1f}s | {estimated_size_mb:.1f}MB", end="", flush=True)
+                    duration = len(all_frames) * CHUNK / RATE
+                    estimated_size_mb = (len(all_frames) * CHUNK * 4) / (1024 * 1024)  # 32-bit float = 4 bytes
+                    print(f"\r🎤 Recording... {duration:.1f}s | {estimated_size_mb:.1f}MB", end="", flush=True)
                     last_visual_update = current_time
-                
-               # Check if we should create a chunk using VAD
-                should_create, reason = recognizer.vad_service.should_create_chunk(
-                    current_audio, RATE, MAX_DURATION_SECONDS
-                )
-                
-                # Debug logging
-                if duration > 5.0:  # Only log after 5 seconds to avoid spam
-                    print(f"\n🔍 DEBUG: Duration={duration:.1f}s, Size={estimated_size_mb:.1f}MB, ShouldCreate={should_create}, Reason={reason}")
-                
-                if should_create:
-                    chunk_count += 1
-                    print(f"\n🔄 Chunk {chunk_count} created: {reason}")
-                    
-                    # Process current chunk
-                    chunk_audio = np.frombuffer(b"".join(current_chunk_frames), dtype=np.float32)
-                    all_frames.extend(current_chunk_frames)
-                    
-                    # Reset for next chunk
-                    current_chunk_frames = []
-                    current_chunk_samples = 0
 
         except KeyboardInterrupt:
             print("\n🛑 Recording stopped by user, processing audio...")
             
-            # Add remaining frames to current chunk
-            if current_chunk_frames:
-                all_frames.extend(current_chunk_frames)
-
             if not all_frames:
                 print("❌ No audio recorded")
                 return None
@@ -262,13 +261,8 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
             total_duration = len(audio_data) / RATE
             print(f"📊 Total recording: {total_duration:.1f}s ({len(audio_data)} samples)")
 
-            # Process audio in chunks if it's too large
-            if len(audio_data) > MAX_SAMPLES:
-                print(f"🔄 Audio exceeds 24MB limit, processing in chunks...")
-                return _process_large_audio_in_chunks(audio_data, RATE, mode, recognizer, enable_diarization)
-            else:
-                # Process normally if under limit
-                return _process_audio_chunk(audio_data, RATE, mode, recognizer, enable_diarization)
+            # Process the entire recording
+            return _process_audio_chunk(audio_data, RATE, mode, recognizer, enable_diarization)
 
         except Exception as e:
             print(f"❌ Recording failed: {e}")
@@ -392,7 +386,7 @@ def _process_large_audio_in_chunks(audio_data, sample_rate, mode, recognizer, en
         print(f"❌ Large audio processing failed: {e}")
         return None
 
-def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False):
+def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False, verbose: bool = False):
     """Continuous microphone transcription with real-time processing and 24MB chunking."""
     print(f"\n🎤 Continuous Microphone {mode.title()}")
     print("=" * 50)
@@ -503,7 +497,7 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
                 if should_create:
                     chunk_count += 1
                     print(f"\n🔄 Chunk {chunk_count} created: {reason}")
-                    print(f"📊 Chunk {chunk_count}: {len(audio_array)} samples, {duration:.1f}s, {accumulated_bytes/1024/1024:.1f}MB")
+                    log_debug(f"Chunk {chunk_count}: {len(audio_array)} samples, {duration:.1f}s, {accumulated_bytes/1024/1024:.1f}MB")
                     
                     # Queue for processing
                     audio_queue.put((audio_array, chunk_count))
@@ -525,7 +519,7 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
                 audio_bytes = b"".join(accumulated_audio)
                 audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
                 duration = len(audio_array) / RATE
-                print(f"📊 Final chunk {chunk_count}: {len(audio_array)} samples, {duration:.1f}s")
+                log_debug(f"Final chunk {chunk_count}: {len(audio_array)} samples, {duration:.1f}s")
                 
                 audio_queue.put((audio_array, chunk_count))
             
@@ -596,6 +590,15 @@ def _process_continuous_audio_chunk_async(audio_data, sample_rate, mode, recogni
                 segment_info = f"Segment {segment_num}" if segment_num else "Audio"
                 print(f"✅ {segment_info} {mode.title()}: Diarization completed")
                 print(f"🎭 Speakers: {result.num_speakers}, Segments: {len(result.segments)}")
+                
+                # Display individual speaker segments with their text
+                for i, segment in enumerate(result.segments):
+                    speaker = segment.speaker_id
+                    text = getattr(segment, 'text', '') or getattr(segment, 'transcription', '') or '[No text]'
+                    if text and text.strip():
+                        print(f"🎤 {speaker}: {text}")
+                    else:
+                        print(f"🎤 {speaker}: [No text detected]")
             else:
                 segment_info = f"Segment {segment_num}" if segment_num else "Audio"
                 print(f"⚠️  {segment_info} {mode.title()}: No text detected")
@@ -624,20 +627,26 @@ EXAMPLES:
     # File-based translation (enhanced diarization)
     python speech_demo.py --file audio.wav --operation translation
     
-    # Microphone transcription (default operation, no diarization)
+    # Microphone single mode (record until Ctrl+C, then process)
     python speech_demo.py --microphone-mode single
     
-    # Microphone translation (no diarization)
+    # Microphone single mode with translation
     python speech_demo.py --microphone-mode single --operation translation
     
-    # Microphone with enhanced diarization
+    # Microphone single mode with diarization
     python speech_demo.py --microphone-mode single --diarize true
     
-    # Microphone continuous with enhanced diarization and translation
+    # Microphone continuous mode (real-time processing with silence detection)
     python speech_demo.py --microphone-mode continuous --operation translation --diarize true
     
     # File with enhanced diarization (always enabled for files)
     python speech_demo.py --file audio.wav --diarize true
+    
+    # Production mode (clean output for demos)
+    python speech_demo.py --microphone-mode continuous --diarize true
+    
+    # Debug mode (verbose logging for development/troubleshooting)
+    python speech_demo.py --microphone-mode continuous --diarize true --verbose
         """,
     )
 
@@ -652,8 +661,8 @@ EXAMPLES:
     parser.add_argument(
         "--microphone-mode",
         choices=["single", "continuous"],
-        help="Microphone mode: single (record once, process, show result) "
-        "or continuous (real-time streaming results)",
+        help="Microphone mode: single (record until Ctrl+C, then process everything) "
+        "or continuous (real-time processing with silence detection)",
     )
 
     parser.add_argument(
@@ -669,7 +678,21 @@ EXAMPLES:
         "parallel processing. Defaults to False.",
     )
 
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose debug logging for development and troubleshooting. "
+        "Default: production mode with clean output.",
+    )
+
     args = parser.parse_args()
+    
+    # Set global verbose mode
+    global VERBOSE_MODE
+    VERBOSE_MODE = args.verbose
+    
+    # Configure warning display based on verbose mode
+    configure_warnings(args.verbose)
 
     # Validate arguments
     if not args.file and not args.microphone_mode:
@@ -685,6 +708,13 @@ EXAMPLES:
     # Create speech recognizer
     try:
         speech_config = SpeechConfig()
+        
+        # Configure translation if requested
+        if args.operation == "translation":
+            speech_config.enable_translation = True
+            speech_config.set_translation_target_language("en")
+            print("🔀 Translation mode enabled (target: English)")
+        
         recognizer = SpeechRecognizer(speech_config)
         print("✅ Speech recognizer initialized successfully")
     except Exception as e:
@@ -695,12 +725,12 @@ EXAMPLES:
     try:
         if args.file:
             # For file processing, use diarization based on --diarize parameter
-            result = process_audio_file(args.file, args.operation, recognizer, args.diarize)
+            result = process_audio_file(args.file, args.operation, recognizer, args.diarize, args.verbose)
         else:  # microphone
             if args.microphone_mode == "single":
-                result = process_microphone_single(args.operation, recognizer, args.diarize)
+                result = process_microphone_single(args.operation, recognizer, args.diarize, args.verbose)
             else:  # continuous
-                result = process_microphone_continuous(args.operation, recognizer, args.diarize)
+                result = process_microphone_continuous(args.operation, recognizer, args.diarize, args.verbose)
 
         if result:
             print(f"\n✅ Processing completed successfully!")

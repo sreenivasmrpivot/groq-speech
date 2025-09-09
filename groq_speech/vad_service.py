@@ -82,8 +82,8 @@ class VADConfig:
     """Configuration for Voice Activity Detection."""
     threshold: float = 0.3  # Speech detection threshold (0.0-1.0) - Lowered for better sensitivity
     min_speech_duration_ms: int = 200  # Minimum speech duration in milliseconds - Reduced for better detection
-    min_silence_duration_ms: int = 8000  # Minimum silence duration in milliseconds (8 seconds) - More responsive
-    max_silence_duration_ms: int = 10000  # Maximum silence before forcing chunk (10 seconds)
+    min_silence_duration_ms: int = 15000  # Minimum silence duration in milliseconds (15 seconds) - Less sensitive to brief pauses
+    max_silence_duration_ms: int = 20000  # Maximum silence before forcing chunk (20 seconds)
     sample_rate: int = 16000  # Audio sample rate
     enable_noise_filtering: bool = True  # Enable noise reduction before VAD
     noise_reduction_strength: float = 0.6  # Noise reduction strength (0.0-1.0) - Reduced to preserve speech
@@ -313,7 +313,7 @@ class VADService:
                 return segments
                 
             elif self._vad_type == "webrtc":
-                # Use WebRTC VAD
+                # Use WebRTC VAD with pre-filtering for very quiet audio
                 import webrtcvad
                 
                 # WebRTC VAD requires 16-bit PCM audio
@@ -338,6 +338,29 @@ class VADService:
                         continue
                     
                     try:
+                        # Pre-filter: Skip very quiet frames to reduce false positives
+                        frame_rms = np.sqrt(np.mean((frame / 32767.0) ** 2))
+                        if frame_rms < 0.01:  # Very quiet threshold
+                            # Treat as silence regardless of VAD
+                            if current_segment_start is not None:
+                                # End current segment
+                                end_sample = i + frame_size
+                                start_time = current_segment_start / sample_rate
+                                end_time = end_sample / sample_rate
+                                duration = end_time - start_time
+                                
+                                if duration >= self.config.min_speech_duration_ms / 1000:
+                                    segments.append(SpeechSegment(
+                                        start_sample=current_segment_start,
+                                        end_sample=end_sample,
+                                        start_time=start_time,
+                                        end_time=end_time,
+                                        duration=duration,
+                                        confidence=0.8
+                                    ))
+                                current_segment_start = None
+                            continue
+                        
                         is_speech = self._model.is_speech(frame.tobytes(), sample_rate)
                         
                         if is_speech and current_segment_start is None:
@@ -437,61 +460,48 @@ class VADService:
         if max_duration_seconds and duration_seconds >= max_duration_seconds:
             return True, f"Maximum duration reached ({duration_seconds:.1f}s)"
         
-        # Get current audio level
-        audio_rms = np.sqrt(np.mean(audio_data**2))
-        # More practical quiet threshold for real-world environments (AC, background noise)
-        # 0.05 RMS allows for typical background noise while still detecting actual silence
-        is_quiet = audio_rms < 0.05
-        current_time = time.time()
+        # PRIORITY 3: Only check for silence if we're NOT approaching the size limit
+        # This ensures we prioritize 24MB chunks over silence-based chunking
+        if estimated_size_mb < 20.0:  # Only check silence if we're well under the 24MB limit
+            # Analyze recent audio (last 5 seconds) for more stable silence detection
+            recent_seconds = 5.0
+            recent_samples = int(recent_seconds * sample_rate)
+            recent_audio = audio_data[-recent_samples:] if len(audio_data) > recent_samples else audio_data
+            
+            # Get audio levels for recent audio
+            recent_rms = np.sqrt(np.mean(recent_audio**2))
+            recent_max = np.max(np.abs(recent_audio))
+            current_time = time.time()
+            
+            # Much more conservative silence detection - only trigger on very quiet audio
+            practical_silence_threshold = 0.003  # Very low threshold for conservative detection
+            
+            if recent_rms < practical_silence_threshold and recent_max < 0.01:
+                # Recent audio is very quiet - start or continue silence tracking
+                if self._silence_start_time is None:
+                    self._silence_start_time = current_time
+                    return False, f"Silence started (RMS: {recent_rms:.4f}, Max: {recent_max:.4f})"
+                
+                # Check if we've had enough silence (15 seconds)
+                silence_duration = current_time - self._silence_start_time
+                required_silence_seconds = 15.0  # 15 seconds of continuous silence required
+                if silence_duration >= required_silence_seconds:
+                    # Reset silence tracking for next chunk
+                    self._silence_start_time = None
+                    self._last_audio_time = None
+                    return True, f"Silence detected ({silence_duration:.1f}s, RMS: {recent_rms:.4f})"
+                
+                return False, f"Silence continuing... ({silence_duration:.1f}s, RMS: {recent_rms:.4f})"
+            
+            else:
+                # Recent audio detected - reset silence tracking
+                if self._silence_start_time is not None:
+                    self._silence_start_time = None
+                self._last_audio_time = current_time
+                return False, f"Audio detected (RMS: {recent_rms:.4f}, Max: {recent_max:.4f}, {duration_seconds:.1f}s, {estimated_size_mb:.1f}MB)"
         
-        # If VAD is not available, use enhanced fallback
-        if not self._ensure_initialized():
-            # Enhanced fallback using multiple audio features
-            audio_max = np.max(np.abs(audio_data))
-            audio_std = np.std(audio_data)
-            
-            # More practical silence detection for real-world environments (AC, background noise)
-            # Relaxed thresholds to handle typical background noise levels
-            is_silence = (audio_rms < 0.03 and audio_max < 0.05 and audio_std < 0.02)
-            
-            if is_silence:
-                if duration_seconds >= self.config.max_silence_duration_ms / 1000:
-                    return True, f"Silence duration exceeded (fallback, {duration_seconds:.1f}s)"
-                return False, "No speech detected (fallback), continuing..."
-            
-            # Check for very short audio bursts that might be noise
-            if duration_seconds < 0.5 and audio_rms < 0.05:
-                return False, f"Short audio burst detected (fallback), continuing... (RMS: {audio_rms:.4f})"
-            
-            return False, f"Audio detected (fallback), continuing... (RMS: {audio_rms:.4f}, Max: {audio_max:.4f})"
-        
-        # PRIORITY 3: VAD-based silence detection with state tracking
-        # Use proper VAD to detect speech, not just RMS
-        segments = self._detect_speech_segments(audio_data, sample_rate)
-        has_speech = len(segments) > 0
-        
-        if not has_speech:
-            # No speech detected by VAD - start or continue silence tracking
-            if self._silence_start_time is None:
-                self._silence_start_time = current_time
-                return False, f"Silence started, tracking... (VAD: no speech, RMS: {audio_rms:.4f})"
-            
-            # Check if we've had enough silence
-            silence_duration = current_time - self._silence_start_time
-            if silence_duration >= self.config.min_silence_duration_ms / 1000:
-                # Reset silence tracking for next chunk
-                self._silence_start_time = None
-                self._last_audio_time = None
-                return True, f"Silence detected ({silence_duration:.1f}s, VAD: no speech, RMS: {audio_rms:.4f})"
-            
-            return False, f"Silence continuing... ({silence_duration:.1f}s, VAD: no speech, RMS: {audio_rms:.4f})"
-        
-        else:
-            # Speech detected by VAD - reset silence tracking and update last audio time
-            if self._silence_start_time is not None:
-                self._silence_start_time = None  # Reset silence tracking
-            self._last_audio_time = current_time
-            return False, f"Speech detected, continuing... (VAD: {len(segments)} segments, RMS: {audio_rms:.4f}, {duration_seconds:.1f}s, {estimated_size_mb:.1f}MB)"
+        # If we're approaching the size limit, don't check for silence - just continue recording
+        return False, f"Continuing to 24MB limit ({estimated_size_mb:.1f}MB, {duration_seconds:.1f}s)"
     
     def get_audio_level(self, audio_data: np.ndarray) -> float:
         """

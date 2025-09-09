@@ -9,12 +9,10 @@ ARCHITECTURE OVERVIEW:
 1. CORE COMPONENTS
    - SpeechConfig: Configuration management for speech services
    - SpeechRecognizer: Main speech recognition engine
-   - AudioConfig: Audio input/output configuration and management
    - ResultReason: Recognition result status and categorization
 
 2. CONFIGURATION SYSTEM
    - Config: Centralized configuration management
-   - PropertyId: Configurable property definitions
    - Environment-based configuration with defaults
 
 3. ERROR HANDLING
@@ -37,13 +35,11 @@ USAGE EXAMPLES:
     # Basic speech recognition
     from groq_speech import SpeechConfig, SpeechRecognizer
 
-    config = SpeechConfig()
-    recognizer = SpeechRecognizer(config)
-    result = recognizer.recognize_once()
+    recognizer = SpeechRecognizer(api_key="your-api-key")
+    result = recognizer.recognize_audio_data(audio_data)
 
     # Translation to English
-    config.enable_translation = True
-    recognizer = SpeechRecognizer(config)
+    recognizer = SpeechRecognizer(api_key="your-api-key", translation_target_language="en")
     result = recognizer.translate_audio_data(audio_data)
 
     # Continuous recognition
@@ -51,24 +47,22 @@ USAGE EXAMPLES:
     # ... handle events ...
     recognizer.stop_continuous_recognition()
 
-    # Audio configuration
-    from groq_speech import AudioConfig
+    # Diarization
+    from groq_speech import Diarizer
 
-    with AudioConfig() as audio:
-        chunk = audio.read_audio_chunk(1024)
+    diarizer = Diarizer()
+    result = diarizer.diarize("audio.wav", "transcription")
 
     # Configuration management
     from groq_speech import Config
 
     api_key = Config.get_api_key()
-    model_config = Config.get_model_config()
 """
 
 from .speech_config import SpeechConfig
 from .speech_recognizer import SpeechRecognizer, SpeechRecognitionResult
 from .result_reason import ResultReason, CancellationReason
-# PropertyId removed - using string constants directly
-from .config import Config, get_config
+from .config import Config
 from .speaker_diarization import DiarizationConfig, SpeakerSegment, DiarizationResult, Diarizer
 
 # SDK version information
@@ -82,9 +76,7 @@ __all__ = [
     "SpeechRecognitionResult",  # Recognition result objects
     "ResultReason",  # Recognition result status
     "CancellationReason",  # Error categorization
-    "PropertyId",  # Configurable properties
     "Config",  # Configuration management
-    "get_config",  # Configuration access function
     "DiarizationConfig",  # Speaker diarization config
     "SpeakerSegment",  # Individual speaker segment
     "DiarizationResult",  # Complete diarization result

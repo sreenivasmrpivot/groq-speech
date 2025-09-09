@@ -153,8 +153,8 @@ class GroqAPIClient:
             API response object
         """
         try:
-            translation_params = self._build_translation_params(audio_buffer)
-            return self.client.audio.translations.create(**translation_params)
+            api_params = self._build_translation_api_params(audio_buffer)
+            return self.client.audio.translations.create(**api_params)
         except Exception as e:
             raise Exception(f"Groq translation API call failed: {str(e)}")
     
@@ -192,28 +192,33 @@ class GroqAPIClient:
         
         return api_params
     
-    def _build_translation_params(self, audio_buffer: io.BytesIO) -> Dict[str, Any]:
+    def _build_translation_api_params(self, audio_buffer: io.BytesIO) -> Dict[str, Any]:
         """Build API parameters for translation - O(1) operation."""
-        model = self._model_config["model_id"]
+        # Translation uses whisper-large-v3 model (not turbo)
+        model = "whisper-large-v3"
         response_format = self._model_config["response_format"]
         temperature = self._model_config["temperature"]
         
+        # Get prompt if available
         prompt = (
             self.speech_config.get_property("Speech_Recognition_Prompt")
             or None
         )
         
-        translation_params = {
+        # Translation API parameters (only supports: file, model, prompt, response_format, temperature)
+        api_params = {
             "file": ("audio.wav", audio_buffer.getvalue(), "audio/wav"),
             "model": model,
             "response_format": response_format,
             "temperature": temperature,
         }
         
+        # Add prompt if available
         if prompt:
-            translation_params["prompt"] = prompt
+            api_params["prompt"] = prompt
         
-        return translation_params
+        return api_params
+    
 
 
 class ResponseParser:
@@ -382,7 +387,7 @@ class DiarizationService:
             self._diarizer = None
     
     
-    def diarize_file(self, audio_file: str, mode: str) -> DiarizationResult:
+    def diarize_file(self, audio_file: str, mode: str, verbose: bool = False) -> DiarizationResult:
         """
         Perform speaker diarization on audio file - O(n log n) operation.
         
@@ -647,7 +652,7 @@ class SpeechRecognizer:
                 "session_stopped", {"session_id": f"session_{int(time.time())}"}
             )
     
-    def _process_audio_with_diarization(self, audio_file: str, mode: str) -> DiarizationResult:
+    def _process_audio_with_diarization(self, audio_file: str, mode: str, verbose: bool = False) -> DiarizationResult:
         """Process audio file with enhanced diarization."""
-        return self.diarization_service.diarize_file(audio_file, mode)
+        return self.diarization_service.diarize_file(audio_file, mode, verbose)
     
