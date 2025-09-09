@@ -65,7 +65,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from groq_speech.speech_recognizer import SpeechRecognizer
 from groq_speech.speech_config import SpeechConfig
-from groq_speech.config import Config
 from groq_speech.speaker_diarization import DiarizationConfig
 
 
@@ -89,8 +88,8 @@ def validate_environment(enable_diarization: bool = False):
 
     # Only check HF_TOKEN if diarization is needed
     if enable_diarization:
-        hf_token = os.getenv("HF_TOKEN")
-        if not hf_token or hf_token == "your_hf_token_here":
+        hf_token = SpeechConfig.get_hf_token()
+        if not hf_token:
             print("⚠️  HF_TOKEN not configured - Limited diarization capability")
             print("💡 For full speaker diarization, configure HF_TOKEN:")
             print("   1. Get token from: " "https://huggingface.co/settings/tokens")
@@ -145,8 +144,6 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
                 result = recognizer.translate_file(audio_file, enable_diarization=False)
             else:
                 result = recognizer.recognize_file(audio_file, enable_diarization=False)
-
-        processing_time = time.time() - start_time
 
         if not result:
             # Fallback to basic transcription
@@ -734,7 +731,6 @@ EXAMPLES:
 
         if result:
             print(f"\n✅ Processing completed successfully!")
-            # print(f"🎯 Operation: {args.operation}")
             if hasattr(result, "segments"):
                 print(f"🎭 Speakers: {result.num_speakers}")
                 print(f"📊 Speaker Segment Groups: {len(result.segments)}")

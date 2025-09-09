@@ -66,9 +66,9 @@ import soundfile as sf  # type: ignore
 import groq
 from .speech_config import SpeechConfig
 from .result_reason import ResultReason
-from .config import Config
 from .speaker_diarization import DiarizationResult
 from .vad_service import VADConfig, VADService
+from .exceptions import APIError, AudioError, create_api_error, create_audio_error
 
 
 # ============================================================================
@@ -117,107 +117,6 @@ class SpeechRecognitionResult:
 
 
 
-class GroqAPIClient:
-    """Handles Groq API communication - O(1) operations with network I/O."""
-    
-    def __init__(self, api_key: str, speech_config: SpeechConfig):
-        """Initialize Groq API client."""
-        self.client = groq.Groq(api_key=api_key)
-        self.speech_config = speech_config
-        self._model_config = Config.get_model_config()
-    
-    def transcribe(self, audio_buffer: io.BytesIO) -> Any:
-        """
-        Transcribe audio using Groq API - O(1) operation with network I/O.
-        
-        Args:
-            audio_buffer: Audio data buffer in WAV format
-            
-        Returns:
-            API response object
-        """
-        try:
-            api_params = self._build_api_params(audio_buffer)
-            return self.client.audio.transcriptions.create(**api_params)
-        except Exception as e:
-            raise Exception(f"Groq transcription API call failed: {str(e)}")
-    
-    def translate(self, audio_buffer: io.BytesIO) -> Any:
-        """
-        Translate audio using Groq API - O(1) operation with network I/O.
-        
-        Args:
-            audio_buffer: Audio data buffer in WAV format
-            
-        Returns:
-            API response object
-        """
-        try:
-            api_params = self._build_translation_api_params(audio_buffer)
-            return self.client.audio.translations.create(**api_params)
-        except Exception as e:
-            raise Exception(f"Groq translation API call failed: {str(e)}")
-    
-    def _build_api_params(self, audio_buffer: io.BytesIO) -> Dict[str, Any]:
-        """Build API parameters for transcription - O(1) operation."""
-        model = self._model_config["model_id"]
-        response_format = self._model_config["response_format"]
-        temperature = self._model_config["temperature"]
-        
-        prompt = (
-            self.speech_config.get_property("Speech_Recognition_Prompt")
-            or None
-        )
-        
-        # Prepare timestamp granularities
-        timestamp_granularities = []
-        if self._model_config["enable_word_timestamps"]:
-            timestamp_granularities.append("word")
-        if self._model_config["enable_segment_timestamps"]:
-            timestamp_granularities.append("segment")
-        
-        if not timestamp_granularities:
-            timestamp_granularities = ["segment"]
-        
-        api_params = {
-            "file": ("audio.wav", audio_buffer.getvalue(), "audio/wav"),
-            "model": model,
-            "response_format": response_format,
-            "timestamp_granularities": timestamp_granularities,
-            "temperature": temperature,
-        }
-        
-        if prompt:
-            api_params["prompt"] = prompt
-        
-        return api_params
-    
-    def _build_translation_api_params(self, audio_buffer: io.BytesIO) -> Dict[str, Any]:
-        """Build API parameters for translation - O(1) operation."""
-        # Translation uses whisper-large-v3 model (not turbo)
-        model = "whisper-large-v3"
-        response_format = self._model_config["response_format"]
-        temperature = self._model_config["temperature"]
-        
-        # Get prompt if available
-        prompt = (
-            self.speech_config.get_property("Speech_Recognition_Prompt")
-            or None
-        )
-        
-        # Translation API parameters (only supports: file, model, prompt, response_format, temperature)
-        api_params = {
-            "file": ("audio.wav", audio_buffer.getvalue(), "audio/wav"),
-            "model": model,
-            "response_format": response_format,
-            "temperature": temperature,
-        }
-        
-        # Add prompt if available
-        if prompt:
-            api_params["prompt"] = prompt
-        
-        return api_params
     
 
 
@@ -431,14 +330,160 @@ class DiarizationService:
 
 
 # ============================================================================
-# MAIN SPEECH RECOGNIZER CLASS (Orchestrator Pattern)
+# INTERFACES (Interface Segregation Principle)
+# ============================================================================
+
+class IAudioProcessor:
+    """Interface for audio processing operations."""
+    
+    def process_audio(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """Process audio data for recognition."""
+        raise NotImplementedError
+
+class IAPIClient:
+    """Interface for API communication."""
+    
+    def transcribe(self, audio_buffer: io.BytesIO) -> Any:
+        """Transcribe audio using API."""
+        raise NotImplementedError
+    
+    def translate(self, audio_buffer: io.BytesIO) -> Any:
+        """Translate audio using API."""
+        raise NotImplementedError
+
+class IDiarizationService:
+    """Interface for diarization operations."""
+    
+    def diarize_file(self, audio_file: str, mode: str) -> DiarizationResult:
+        """Perform diarization on audio file."""
+        raise NotImplementedError
+
+# ============================================================================
+# CONCRETE IMPLEMENTATIONS (Single Responsibility Principle)
+# ============================================================================
+
+class AudioProcessor(IAudioProcessor):
+    """Handles audio preprocessing and optimization - Single Responsibility."""
+    
+    def __init__(self, vad_service: VADService):
+        """Initialize audio processor with VAD service."""
+        self.vad_service = vad_service
+    
+    def process_audio(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """Process audio data for recognition - O(n) operation."""
+        # Ensure audio is mono (Groq API requirement)
+        if len(audio_data.shape) > 1 and audio_data.shape[1] > 1:
+            audio_data = np.mean(audio_data, axis=1)
+
+        # Resample to 16kHz if needed
+        if sample_rate != 16000:
+            ratio = 16000 / sample_rate
+            new_length = int(len(audio_data) * ratio)
+            audio_data = np.interp(
+                np.linspace(0, len(audio_data), new_length),
+                np.arange(len(audio_data)),
+                audio_data,
+            )
+        
+        # Apply noise filtering for better recognition quality
+        if self.vad_service:
+            audio_data = self.vad_service._apply_noise_filtering(audio_data, 16000)
+        
+        return audio_data
+
+class APIClient(IAPIClient):
+    """Handles API communication - Single Responsibility."""
+    
+    def __init__(self, api_key: str, speech_config: SpeechConfig):
+        """Initialize API client."""
+        self.client = groq.Groq(api_key=api_key)
+        self.speech_config = speech_config
+        self._model_config = SpeechConfig.get_model_config()
+    
+    def transcribe(self, audio_buffer: io.BytesIO) -> Any:
+        """Transcribe audio using Groq API - O(1) operation with network I/O."""
+        try:
+            api_params = self._build_api_params(audio_buffer)
+            return self.client.audio.transcriptions.create(**api_params)
+        except Exception as e:
+            raise create_api_error(f"Groq transcription API call failed: {str(e)}")
+    
+    def translate(self, audio_buffer: io.BytesIO) -> Any:
+        """Translate audio using Groq API - O(1) operation with network I/O."""
+        try:
+            api_params = self._build_translation_api_params(audio_buffer)
+            return self.client.audio.translations.create(**api_params)
+        except Exception as e:
+            raise create_api_error(f"Groq translation API call failed: {str(e)}")
+    
+    def _build_api_params(self, audio_buffer: io.BytesIO) -> Dict[str, Any]:
+        """Build API parameters for transcription - O(1) operation."""
+        model = self._model_config["model_id"]
+        response_format = self._model_config["response_format"]
+        temperature = self._model_config["temperature"]
+        
+        prompt = (
+            self.speech_config.get_property("Speech_Recognition_Prompt")
+            or None
+        )
+        
+        # Prepare timestamp granularities
+        timestamp_granularities = []
+        if self._model_config["enable_word_timestamps"]:
+            timestamp_granularities.append("word")
+        if self._model_config["enable_segment_timestamps"]:
+            timestamp_granularities.append("segment")
+        
+        if not timestamp_granularities:
+            timestamp_granularities = ["segment"]
+        
+        api_params = {
+            "file": ("audio.wav", audio_buffer.getvalue(), "audio/wav"),
+            "model": model,
+            "response_format": response_format,
+            "timestamp_granularities": timestamp_granularities,
+            "temperature": temperature,
+        }
+        
+        if prompt:
+            api_params["prompt"] = prompt
+        
+        return api_params
+    
+    def _build_translation_api_params(self, audio_buffer: io.BytesIO) -> Dict[str, Any]:
+        """Build API parameters for translation - O(1) operation."""
+        # Translation uses whisper-large-v3 model (not turbo)
+        model = "whisper-large-v3"
+        response_format = self._model_config["response_format"]
+        temperature = self._model_config["temperature"]
+        
+        prompt = (
+            self.speech_config.get_property("Speech_Recognition_Prompt")
+            or None
+        )
+        
+        # Translation API parameters (only supports: file, model, prompt, response_format, temperature)
+        api_params = {
+            "file": ("audio.wav", audio_buffer.getvalue(), "audio/wav"),
+            "model": model,
+            "response_format": response_format,
+            "temperature": temperature,
+        }
+        
+        if prompt:
+            api_params["prompt"] = prompt
+        
+        return api_params
+
+# ============================================================================
+# MAIN SPEECH RECOGNIZER CLASS (Facade Pattern + Dependency Injection)
 # ============================================================================
 
 class SpeechRecognizer:
     """
     Main class for speech recognition using Groq services.
     
-    This class orchestrates all the services and follows the Facade pattern
+    This class follows the Facade pattern and uses Dependency Injection
     to provide a simple interface for speech recognition operations.
     """
     
@@ -448,10 +493,14 @@ class SpeechRecognizer:
         api_key: Optional[str] = None,
         enable_diarization: bool = False,
         translation_target_language: str = "en",
-        sample_rate: int = 16000
+        sample_rate: int = 16000,
+        # Dependency injection for better testability
+        api_client: Optional[IAPIClient] = None,
+        audio_processor: Optional[IAudioProcessor] = None,
+        diarization_service: Optional[IDiarizationService] = None
     ):
         """
-        Initialize speech recognizer with configuration.
+        Initialize speech recognizer with configuration and dependencies.
         
         Args:
             speech_config: Speech configuration (optional)
@@ -459,6 +508,9 @@ class SpeechRecognizer:
             enable_diarization: Whether to enable speaker diarization
             translation_target_language: Target language for translation
             sample_rate: Audio sample rate
+            api_client: API client implementation (for testing)
+            audio_processor: Audio processor implementation (for testing)
+            diarization_service: Diarization service implementation (for testing)
         """
         # Initialize configuration
         if speech_config is None:
@@ -471,15 +523,23 @@ class SpeechRecognizer:
         self.enable_diarization = enable_diarization
         self.translation_target_language = translation_target_language
         
-        # Initialize services (Dependency Injection)
-        self.api_client = GroqAPIClient(speech_config.api_key, speech_config)
-        self.response_parser = ResponseParser(speech_config)
-        self._diarization_service = None  # Lazy-loaded only when needed
-        self.event_manager = EventManager()
-        
         # Initialize VAD service for intelligent chunking
         self.vad_config = VADConfig(sample_rate=sample_rate)
         self.vad_service = VADService(self.vad_config)
+        
+        # Initialize services with dependency injection (Dependency Inversion Principle)
+        self.api_client = api_client or APIClient(speech_config.api_key, speech_config)
+        self.audio_processor = audio_processor or AudioProcessor(self.vad_service)
+        self.response_parser = ResponseParser(speech_config)
+        self._diarization_service = diarization_service  # Lazy-loaded only when needed
+        self.event_manager = EventManager()
+    
+    @property
+    def diarization_service(self) -> IDiarizationService:
+        """Get diarization service with lazy loading."""
+        if self._diarization_service is None:
+            self._diarization_service = DiarizationService(self)
+        return self._diarization_service
         
         
         # Continuous recognition state (used by API)
@@ -513,36 +573,19 @@ class SpeechRecognizer:
         
         Args:
             audio_data: Audio data as numpy array
+            sample_rate: Audio sample rate
             is_translation: Whether to use translation endpoint
             
         Returns:
             SpeechRecognitionResult with recognition data and timing metrics
         """
-        # Start processing
-        
         try:
-            # Preprocess audio - O(n)
-            # Ensure audio is mono (Groq API requirement)
-            if len(audio_data.shape) > 1 and audio_data.shape[1] > 1:
-                audio_data = np.mean(audio_data, axis=1)
-
-            # Resample to 16kHz if needed
-            if sample_rate != 16000:
-                ratio = 16000 / sample_rate
-                new_length = int(len(audio_data) * ratio)
-                audio_data = np.interp(
-                    np.linspace(0, len(audio_data), new_length),
-                    np.arange(len(audio_data)),
-                    audio_data,
-                )
-            
-            # Apply noise filtering for better recognition quality
-            if hasattr(self, 'vad_service') and self.vad_service:
-                audio_data = self.vad_service._apply_noise_filtering(audio_data, 16000)
+            # Process audio using dedicated processor - O(n)
+            processed_audio = self.audio_processor.process_audio(audio_data, sample_rate)
             
             # Save audio to temporary buffer - O(n)
             buffer = io.BytesIO()
-            sf.write(buffer, audio_data, 16000, format="WAV")
+            sf.write(buffer, processed_audio, 16000, format="WAV")
             buffer.seek(0)
             
             # Call Groq API - O(1) with network I/O

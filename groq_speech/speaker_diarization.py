@@ -203,28 +203,28 @@ class DiarizationConfig:
     @classmethod
     def from_environment(cls) -> "DiarizationConfig":
         """Create configuration from environment variables."""
-        from .config import Config
+        from .speech_config import SpeechConfig
 
-        config_dict = Config.get_diarization_config()
+        config_dict = SpeechConfig.get_diarization_config()
 
         return cls(
-            min_speakers=Config.DIARIZATION_MAX_SPEAKERS,
-            max_speakers=Config.DIARIZATION_MAX_SPEAKERS,
-            min_segment_duration=Config.DIARIZATION_MIN_SEGMENT_DURATION,
-            max_segment_duration=Config.DIARIZATION_MAX_CHUNK_DURATION,
+            min_speakers=config_dict["max_speakers"],
+            max_speakers=config_dict["max_speakers"],
+            min_segment_duration=config_dict["min_segment_duration"],
+            max_segment_duration=30.0,  # Default max duration
             confidence_threshold=0.7,  # Default confidence
-            silence_threshold=Config.DIARIZATION_SILENCE_THRESHOLD,
-            speaker_change_sensitivity=Config.DIARIZATION_SPEAKER_CHANGE_SENSITIVITY,
-            max_segments_per_chunk=Config.DIARIZATION_MAX_SEGMENTS_PER_CHUNK,
-            chunk_strategy=Config.DIARIZATION_CHUNK_STRATEGY,
-            min_chunk_duration=Config.DIARIZATION_MIN_CHUNK_DURATION,
-            max_chunk_duration=Config.DIARIZATION_MAX_CHUNK_DURATION,
-            overlap_duration=Config.DIARIZATION_OVERLAP_DURATION,
-            enable_cross_chunk_persistence=Config.DIARIZATION_ENABLE_CROSS_CHUNK_PERSISTENCE,
-            speaker_similarity_threshold=Config.DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD,
-            enable_adaptive_merging=Config.DIARIZATION_ENABLE_ADAPTIVE_MERGING,
-            merge_time_threshold=Config.DIARIZATION_MERGE_TIME_THRESHOLD,
-            enable_context_awareness=Config.DIARIZATION_ENABLE_CONTEXT_AWARENESS,
+            silence_threshold=config_dict["silence_threshold"],
+            speaker_change_sensitivity=0.7,  # Default sensitivity
+            max_segments_per_chunk=config_dict["max_segments_per_chunk"],
+            chunk_strategy=config_dict["chunk_strategy"],
+            min_chunk_duration=15.0,  # Default min chunk duration
+            max_chunk_duration=30.0,  # Default max chunk duration
+            overlap_duration=2.0,  # Default overlap duration
+            enable_cross_chunk_persistence=True,  # Default persistence
+            speaker_similarity_threshold=0.85,  # Default similarity threshold
+            enable_adaptive_merging=True,  # Default adaptive merging
+            merge_time_threshold=1.5,  # Default merge threshold
+            enable_context_awareness=True,  # Default context awareness
         )
 
     def validate(self) -> bool:
@@ -673,8 +673,8 @@ class Diarizer:
             print("   🔍 Step 1: Detecting speakers with Pyannote.audio...")
             
             # Get HF token from Config
-            from .config import Config
-            hf_token = Config.get_hf_token()
+            from .speech_config import SpeechConfig
+            hf_token = SpeechConfig.get_hf_token()
             
             if not hf_token or hf_token == "your_hf_token_here":
                 raise ValueError("HF_TOKEN not configured for Pyannote.audio")

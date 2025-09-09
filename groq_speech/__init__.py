@@ -62,8 +62,15 @@ USAGE EXAMPLES:
 from .speech_config import SpeechConfig
 from .speech_recognizer import SpeechRecognizer, SpeechRecognitionResult
 from .result_reason import ResultReason, CancellationReason
-from .config import Config
 from .speaker_diarization import DiarizationConfig, SpeakerSegment, DiarizationResult, Diarizer
+from .exceptions import (
+    GroqSpeechException,
+    ConfigurationError,
+    APIError,
+    AudioError,
+    DiarizationError,
+    VADError
+)
 
 # SDK version information
 __version__ = "1.0.0"
@@ -76,9 +83,15 @@ __all__ = [
     "SpeechRecognitionResult",  # Recognition result objects
     "ResultReason",  # Recognition result status
     "CancellationReason",  # Error categorization
-    "Config",  # Configuration management
     "DiarizationConfig",  # Speaker diarization config
     "SpeakerSegment",  # Individual speaker segment
     "DiarizationResult",  # Complete diarization result
     "Diarizer",  # Simplified diarizer (replaces SpeakerDiarizer and EnhancedDiarizer)
+    # Exception classes
+    "GroqSpeechException",  # Base exception
+    "ConfigurationError",  # Configuration errors
+    "APIError",  # API communication errors
+    "AudioError",  # Audio processing errors
+    "DiarizationError",  # Diarization errors
+    "VADError",  # Voice Activity Detection errors
 ]

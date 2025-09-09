@@ -415,20 +415,6 @@ class VADService:
             print(f"⚠️  VAD detection failed: {e}")
             return []
     
-    def _unused_has_speech(self, audio_data: np.ndarray, 
-                   sample_rate: Optional[int] = None) -> bool:
-        """
-        Check if audio contains speech.
-        
-        Args:
-            audio_data: Audio data as numpy array
-            sample_rate: Audio sample rate, uses config default if None
-            
-        Returns:
-            True if speech is detected, False otherwise
-        """
-        segments = self._detect_speech_segments(audio_data, sample_rate)
-        return len(segments) > 0
     
     
     def should_create_chunk(self, audio_data: np.ndarray, 

@@ -54,9 +54,14 @@ USAGE EXAMPLES:
     config.set_property(PropertyId.Speech_Recognition_Temperature, "0.1")
 """
 
-from typing import Optional
-# PropertyId removed - using string constants directly
-from .config import Config
+from typing import Optional, Dict, Any
+import os
+from dotenv import load_dotenv
+
+# Load .env file from the groq_speech directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(current_dir, ".env")
+load_dotenv(env_path)
 
 
 class SpeechConfig:
@@ -79,6 +84,28 @@ class SpeechConfig:
     - Validation and error handling for production use
     - Authorization header generation for API calls
     """
+
+    # Environment Configuration Constants
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    GROQ_API_BASE = os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
+    HF_TOKEN = os.getenv("HF_TOKEN", "")
+    
+    # Model Configuration
+    MODEL_ID = os.getenv("GROQ_MODEL_ID", "whisper-large-v3")
+    TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.0"))
+    RESPONSE_FORMAT = os.getenv("GROQ_RESPONSE_FORMAT", "verbose_json")
+    
+    # Audio Configuration
+    SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
+    CHANNELS = int(os.getenv("AUDIO_CHANNELS", "1"))
+    MAX_FILE_SIZE = int(os.getenv("MAX_AUDIO_FILE_SIZE", "25000000"))  # 25MB
+    
+    # Diarization Configuration
+    DIARIZATION_MIN_SEGMENT_DURATION = float(os.getenv("DIARIZATION_MIN_SEGMENT_DURATION", "2.0"))
+    DIARIZATION_SILENCE_THRESHOLD = float(os.getenv("DIARIZATION_SILENCE_THRESHOLD", "0.8"))
+    DIARIZATION_MAX_SEGMENTS_PER_CHUNK = int(os.getenv("DIARIZATION_MAX_SEGMENTS_PER_CHUNK", "8"))
+    DIARIZATION_CHUNK_STRATEGY = os.getenv("DIARIZATION_CHUNK_STRATEGY", "adaptive")
+    DIARIZATION_MAX_SPEAKERS = int(os.getenv("DIARIZATION_MAX_SPEAKERS", "5"))
 
     def __init__(
         self,
@@ -111,18 +138,18 @@ class SpeechConfig:
         """
         # Get API key from environment if not provided
         # This allows users to set API keys via environment variables
-        self.api_key = api_key or Config.get_api_key()
+        self.api_key = api_key or self.get_api_key()
         if not self.api_key and not authorization_token:
             raise ValueError("API key or authorization token must be provided")
 
         # Network and endpoint configuration
         self.region = region or "us-east-1"
-        self.endpoint = endpoint or Config.GROQ_API_BASE
+        self.endpoint = endpoint or self.GROQ_API_BASE
         self.host = host
         self.authorization_token = authorization_token
 
         # Speech recognition and translation settings
-        self.speech_recognition_language = Config.DEFAULT_LANGUAGE
+        self.speech_recognition_language = "auto"  # Auto-detect language
         self.translation_target_language = (
             "en"  # Default target language for translation
         )
@@ -157,7 +184,7 @@ class SpeechConfig:
 
         # Get model configuration from environment
         # This ensures consistency with the main configuration system
-        model_config = Config.get_model_config()
+        model_config = self.get_model_config()
 
         # Set Groq API properties from environment config
         # These control the AI model behavior and response format
@@ -361,3 +388,51 @@ class SpeechConfig:
 
         if not self.speech_recognition_language:
             raise ValueError("Speech recognition language must be set")
+    
+    @classmethod
+    def get_api_key(cls) -> str:
+        """Get the API key with validation."""
+        if not cls.GROQ_API_KEY or cls.GROQ_API_KEY == "your_groq_api_key_here":
+            raise ValueError(
+                "GROQ_API_KEY not set. Please set it in your .env file or environment variables."
+            )
+        return cls.GROQ_API_KEY
+    
+    @classmethod
+    def get_hf_token(cls) -> Optional[str]:
+        """Get the HuggingFace token for diarization."""
+        token = cls.HF_TOKEN if cls.HF_TOKEN else ""
+        if token in ["your_huggingface_token_here", "your_token_here", ""]:
+            return ""
+        return token
+    
+    @classmethod
+    def get_model_config(cls) -> Dict[str, Any]:
+        """Get model configuration."""
+        return {
+            "model_id": cls.MODEL_ID,
+            "temperature": cls.TEMPERATURE,
+            "response_format": cls.RESPONSE_FORMAT,
+            "enable_word_timestamps": True,
+            "enable_segment_timestamps": True,
+        }
+    
+    @classmethod
+    def get_audio_config(cls) -> Dict[str, Any]:
+        """Get audio configuration."""
+        return {
+            "sample_rate": cls.SAMPLE_RATE,
+            "channels": cls.CHANNELS,
+            "max_file_size": cls.MAX_FILE_SIZE,
+        }
+    
+    @classmethod
+    def get_diarization_config(cls) -> Dict[str, Any]:
+        """Get diarization configuration."""
+        return {
+            "min_segment_duration": cls.DIARIZATION_MIN_SEGMENT_DURATION,
+            "silence_threshold": cls.DIARIZATION_SILENCE_THRESHOLD,
+            "max_segments_per_chunk": cls.DIARIZATION_MAX_SEGMENTS_PER_CHUNK,
+            "chunk_strategy": cls.DIARIZATION_CHUNK_STRATEGY,
+            "max_speakers": cls.DIARIZATION_MAX_SPEAKERS,
+        }
