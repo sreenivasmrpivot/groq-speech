@@ -60,7 +60,7 @@ USAGE EXAMPLES:
 import time
 import threading
 import io
-from typing import Optional, Callable, List, Dict, Any, Union
+from typing import Optional, Callable, List, Dict, Any, Union, Tuple
 import numpy as np
 import soundfile as sf  # type: ignore
 import groq
@@ -390,6 +390,24 @@ class AudioProcessor(IAudioProcessor):
             audio_data = self.vad_service._apply_noise_filtering(audio_data, 16000)
         
         return audio_data
+    
+    def load_and_process_audio_file(self, audio_file: str) -> Tuple[np.ndarray, int]:
+        """Load and preprocess audio file with automatic format handling."""
+        audio_data, sample_rate = sf.read(audio_file)
+        
+        # Convert to mono if stereo
+        if len(audio_data.shape) > 1:
+            audio_data = audio_data[:, 0]
+        
+        # Resample to 16kHz if needed
+        if sample_rate != 16000:
+            from scipy import signal
+            audio_data = signal.resample(
+                audio_data, int(len(audio_data) * 16000 / sample_rate)
+            )
+            sample_rate = 16000
+        
+        return audio_data, sample_rate
 
 class APIClient(IAPIClient):
     """Handles API communication - Single Responsibility."""
@@ -612,41 +630,53 @@ class SpeechRecognizer:
         """Translate audio to English text using Groq API."""
         return self.recognize_audio_data(audio_data, sample_rate, is_translation=True)
     
-    def recognize_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]:
+    def process_file(self, audio_file: str, enable_diarization: bool = True, is_translation: bool = False) -> Union[SpeechRecognitionResult, DiarizationResult]:
         """
-        Recognize audio from file - O(n) operation.
+        Process audio file with automatic fallback handling - O(n) operation.
         
         Args:
             audio_file: Path to audio file
             enable_diarization: Whether to use diarization
+            is_translation: Whether to use translation endpoint
             
         Returns:
             SpeechRecognitionResult or DiarizationResult
         """
-        if enable_diarization:
-            return self.diarization_service.diarize_file(audio_file, "transcription")
-        else:
-            # Load audio file and process directly without diarization
-            audio_data, sample_rate = sf.read(audio_file)
-            return self.recognize_audio_data(audio_data, sample_rate)
+        try:
+            if enable_diarization:
+                mode = "translation" if is_translation else "transcription"
+                result = self.diarization_service.diarize_file(audio_file, mode)
+                if result and self._is_valid_result(result):
+                    return result
+                # Fallback to basic processing if diarization fails
+                return self._process_file_basic(audio_file, is_translation)
+            else:
+                return self._process_file_basic(audio_file, is_translation)
+        except Exception as e:
+            # Try basic fallback on any error
+            return self._process_file_basic(audio_file, is_translation)
+    
+    def _process_file_basic(self, audio_file: str, is_translation: bool = False) -> SpeechRecognitionResult:
+        """Basic file processing with audio preprocessing and fallback."""
+        try:
+            # Use AudioProcessor for consistent preprocessing
+            audio_data, sample_rate = self.audio_processor.load_and_process_audio_file(audio_file)
+            return self.recognize_audio_data(audio_data, sample_rate, is_translation=is_translation)
+        except Exception as e:
+            operation = "translation" if is_translation else "recognition"
+            return SpeechRecognitionResult(
+                reason=ResultReason.Canceled,
+                text=f"File {operation} failed: {str(e)}"
+            )
+    
+    # Convenience methods for backward compatibility
+    def recognize_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]:
+        """Recognize audio from file - convenience method."""
+        return self.process_file(audio_file, enable_diarization, is_translation=False)
     
     def translate_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]:
-        """
-        Translate audio from file - O(n) operation.
-        
-        Args:
-            audio_file: Path to audio file
-            enable_diarization: Whether to use diarization
-            
-        Returns:
-            SpeechRecognitionResult or DiarizationResult
-        """
-        if enable_diarization:
-            return self.diarization_service.diarize_file(audio_file, "translation")
-        else:
-            # Load audio file and process directly without diarization
-            audio_data, sample_rate = sf.read(audio_file)
-            return self.translate_audio_data(audio_data, sample_rate)
+        """Translate audio from file - convenience method."""
+        return self.process_file(audio_file, enable_diarization, is_translation=True)
     
     
     
@@ -698,4 +728,23 @@ class SpeechRecognizer:
     def _process_audio_with_diarization(self, audio_file: str, mode: str, verbose: bool = False) -> DiarizationResult:
         """Process audio file with enhanced diarization."""
         return self.diarization_service.diarize_file(audio_file, mode, verbose)
+    
+    def _is_valid_result(self, result: Union[SpeechRecognitionResult, DiarizationResult]) -> bool:
+        """Check if result is valid and contains meaningful data."""
+        if hasattr(result, 'segments') and result.segments:
+            # DiarizationResult with segments
+            return len(result.segments) > 0
+        elif hasattr(result, 'text') and result.text:
+            # SpeechRecognitionResult with text
+            return len(result.text.strip()) > 0
+        return False
+    
+    # VAD Integration Methods (moved from consumer)
+    def get_audio_level(self, audio_data: np.ndarray) -> float:
+        """Get current audio level for visualization."""
+        return self.vad_service.get_audio_level(audio_data)
+    
+    def should_create_chunk(self, audio_data: np.ndarray, sample_rate: int, max_duration: float) -> Tuple[bool, str]:
+        """Check if audio chunk should be created."""
+        return self.vad_service.should_create_chunk(audio_data, sample_rate, max_duration)
     

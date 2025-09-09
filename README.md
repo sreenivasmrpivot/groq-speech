@@ -28,22 +28,24 @@ print(f"Translated: {result.text}")
 
 ### Command Line Interface
 ```bash
-# File processing with diarization
-python examples/speech_demo.py --file audio.wav --diarize
-
-# File processing without diarization
+# File-based transcription (SDK handles all complexity internally)
 python examples/speech_demo.py --file audio.wav
 
-# Microphone single-shot
+# File-based translation with diarization
+python examples/speech_demo.py --file audio.wav --operation translation --diarize
+
+# Microphone single mode
 python examples/speech_demo.py --microphone-mode single
 
-# Microphone continuous
-python examples/speech_demo.py --microphone-mode continuous
-
-# Translation modes
-python examples/speech_demo.py --file audio.wav --operation translation
-python examples/speech_demo.py --microphone-mode single --operation translation
+# Microphone continuous mode
+python examples/speech_demo.py --microphone-mode continuous --diarize
 ```
+
+**Key Benefits:**
+- **54% fewer lines of code** compared to complex implementations
+- **No fallback logic** - SDK handles everything internally
+- **No manual audio preprocessing** - AudioProcessor handles it automatically
+- **Simple API calls** - Just call `recognizer.recognize_file()` or `recognizer.translate_file()`
 
 ## ✨ Features
 

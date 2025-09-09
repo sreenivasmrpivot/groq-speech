@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
-CORRECT Speech Demo with Proper Diarization Architecture.
+Clean Speech Demo - Leveraging SDK's Internal Capabilities.
 
-This demo implements the CORRECT pipeline:
-1. Pyannote.audio FIRST → Speaker detection
-2. Audio chunking → Speaker-specific segments  
-3. Groq API SECOND → Accurate transcription per segment
-4. Perfect speaker attribution with accurate text
+This demo shows how the SDK now handles all complexity internally,
+providing a clean, simple interface for consumers.
+
+Key Improvements:
+1. No fallback logic in consumer code - SDK handles it internally
+2. No manual audio preprocessing - AudioProcessor handles it
+3. No complex error handling - SDK provides consistent responses
+4. Clean, simple API calls with minimal consumer code
 
 Usage:
-    python speech_demo.py --file audio.wav --operation transcription
-    python speech_demo.py --microphone-mode single --operation transcription
-    python speech_demo.py --help
+    python speech_demo.py --file audio.wav
+    python speech_demo.py --file audio.wav --diarize
+    python speech_demo.py --microphone-mode single
+    python speech_demo.py --microphone-mode continuous --diarize
 """
 
 import argparse
@@ -21,9 +25,12 @@ from pathlib import Path
 import time
 import warnings
 
+# Add the parent directory to the path to import groq_speech
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Global verbose flag for logging control
-VERBOSE_MODE = False
+from groq_speech.speech_recognizer import SpeechRecognizer
+from groq_speech.speech_config import SpeechConfig
+
 
 def configure_warnings(verbose: bool = False):
     """Configure warning display based on verbose mode."""
@@ -38,34 +45,46 @@ def configure_warnings(verbose: bool = False):
         # Show all warnings in verbose mode
         warnings.resetwarnings()
 
-def log_debug(message: str):
-    """Log debug message only in verbose mode."""
-    if VERBOSE_MODE:
-        print(f"🔍 {message}")
 
-def log_info(message: str):
-    """Log info message always."""
-    print(f"ℹ️  {message}")
-
-def log_success(message: str):
-    """Log success message always."""
-    print(f"✅ {message}")
-
-def log_warning(message: str):
-    """Log warning message always."""
-    print(f"⚠️  {message}")
-
-def log_error(message: str):
-    """Log error message always."""
-    print(f"❌ {message}")
-
-
-# Add the parent directory to the path to import groq_speech
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from groq_speech.speech_recognizer import SpeechRecognizer
-from groq_speech.speech_config import SpeechConfig
-from groq_speech.speaker_diarization import DiarizationConfig
+def _trim_silence_from_end(audio_data, sample_rate, silence_threshold=0.01, min_silence_duration=0.5):
+    """
+    Trim silence from the end of audio data to improve processing quality.
+    
+    Args:
+        audio_data: Audio data as numpy array
+        sample_rate: Sample rate of the audio
+        silence_threshold: RMS threshold below which audio is considered silence
+        min_silence_duration: Minimum duration of silence to trim (seconds)
+        
+    Returns:
+        Trimmed audio data
+    """
+    import numpy as np
+    
+    if len(audio_data) == 0:
+        return audio_data
+    
+    # Calculate RMS for each 0.1 second window
+    window_size = int(sample_rate * 0.1)  # 0.1 second windows
+    min_silence_samples = int(sample_rate * min_silence_duration)
+    
+    # Find the last non-silent window
+    last_non_silent = len(audio_data)
+    
+    for i in range(len(audio_data) - window_size, 0, -window_size):
+        window = audio_data[i:i + window_size]
+        rms = np.sqrt(np.mean(window**2))
+        
+        if rms > silence_threshold:
+            last_non_silent = i + window_size
+            break
+    
+    # Ensure we don't trim too much (keep at least 0.5 seconds)
+    min_keep_samples = int(sample_rate * 0.5)
+    if last_non_silent < min_keep_samples:
+        last_non_silent = min_keep_samples
+    
+    return audio_data[:last_non_silent]
 
 
 def validate_environment(enable_diarization: bool = False):
@@ -92,13 +111,9 @@ def validate_environment(enable_diarization: bool = False):
         if not hf_token:
             print("⚠️  HF_TOKEN not configured - Limited diarization capability")
             print("💡 For full speaker diarization, configure HF_TOKEN:")
-            print("   1. Get token from: " "https://huggingface.co/settings/tokens")
-            print(
-                "   2. Accept license: "
-                "https://huggingface.co/pyannote/"
-                "speaker-diarization-3.1"
-            )
-            print("   3. Update groq_speech/.env with: " "HF_TOKEN=your_actual_token_here")
+            print("   1. Get token from: https://huggingface.co/settings/tokens")
+            print("   2. Accept license: https://huggingface.co/pyannote/speaker-diarization-3.1")
+            print("   3. Update groq_speech/.env with: HF_TOKEN=your_actual_token_here")
         else:
             print("✅ HF_TOKEN configured - Full Pyannote.audio diarization enabled")
     else:
@@ -108,23 +123,21 @@ def validate_environment(enable_diarization: bool = False):
     return True
 
 
-def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = True, verbose: bool = False):
+def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = True):
     """
-    Process audio file with diarization pipeline.
-
-    FLOW:
-    1. If diarization enabled: Pyannote.audio → Speaker detection → Groq API per segment
-    2. If diarization disabled: Direct Groq API processing
+    Process audio file - NOW ULTRA SIMPLE!
+    
+    The SDK now handles:
+    - Fallback logic internally
+    - Audio preprocessing automatically
+    - Error handling consistently
+    - Format conversion seamlessly
     """
     print(f"\n📁 Processing Audio File: {audio_file}")
     print("=" * 60)
     
     if enable_diarization:
         print("🎭 Diarization Pipeline: Pyannote.audio FIRST, then Groq API per segment")
-        log_debug("Running CORRECT diarization pipeline...")
-        log_debug("1. Pyannote.audio → Speaker detection")
-        log_debug("2. Audio chunking → Speaker-specific segments") 
-        log_debug("3. Groq API → Accurate transcription per segment")
     else:
         print("🎯 Direct Pipeline: Groq API processing without diarization")
 
@@ -132,80 +145,26 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
         print(f"❌ Audio file not found: {audio_file}")
         return None
 
-    start_time = time.time()
-
+    # ULTRA SIMPLE API CALLS - SDK handles EVERYTHING internally!
     try:
-        if enable_diarization:
-            # Use the diarization method
-            result = recognizer._process_audio_with_diarization(audio_file, mode)
-        else:
-            # Use direct processing without diarization
-            if mode == "translation":
-                result = recognizer.translate_file(audio_file, enable_diarization=False)
-            else:
-                result = recognizer.recognize_file(audio_file, enable_diarization=False)
-
-        if not result:
-            # Fallback to basic transcription
-            print(f"🔄 Basic {mode} failed, attempting fallback...")
-
-            # Load audio file and use recognize_audio_data
-            try:
-                import soundfile as sf
-
-                audio_data, sample_rate = sf.read(audio_file)
-
-                # Convert to mono if stereo
-                if len(audio_data.shape) > 1:
-                    audio_data = audio_data[:, 0]
-
-                # Resample to 16kHz if needed
-                if sample_rate != 16000:
-                    from scipy import signal
-
-                    audio_data = signal.resample(
-                        audio_data, int(len(audio_data) * 16000 / sample_rate)
-                    )
-
-                # Use the correct method
-                if mode == "translation":
-                    basic_result = recognizer.translate_audio_data(audio_data, sample_rate)
-                else:
-                    basic_result = recognizer.recognize_audio_data(audio_data, sample_rate)
-
-                if basic_result and basic_result.text:
-                    print(f"✅ Basic {mode} completed: {basic_result.text[:200]}...")
-                    return basic_result
-                else:
-                    print(f"❌ Basic {mode} also failed")
-                    return None
-
-            except Exception as audio_error:
-                print(f"❌ Audio loading failed: {audio_error}")
-                return None
-
-        else:
-            return result
+        is_translation = (mode == "translation")
+        result = recognizer.process_file(audio_file, enable_diarization=enable_diarization, is_translation=is_translation)
+        return result
 
     except Exception as e:
         print(f"❌ File processing failed: {e}")
         return None
 
-def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False, verbose: bool = False):
-    """Simple single-shot microphone recording - record until Ctrl+C, then process everything."""
+
+def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False):
+    """Simple single-shot microphone recording - SDK handles complexity internally."""
     print(f"\n🎤 Single Microphone {mode.title()}")
     print("=" * 50)
-    if enable_diarization:
-        print("💡 Single-shot transcription with diarization - record once, process, show result")
-    else:
-        print("💡 Single-shot transcription mode - record once, process, show result")
     print("💡 Press Ctrl+C to stop recording and process audio")
 
     try:
         import pyaudio
         import numpy as np
-        import soundfile as sf
-        import tempfile
 
         # Audio recording parameters
         CHUNK = 8192
@@ -230,10 +189,10 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
 
         # Simple visual feedback
         last_visual_update = time.time()
-        visual_update_interval = 1.0  # Update every second
+        visual_update_interval = 1.0
 
         try:
-            # Simple recording loop - just record until Ctrl+C
+            # Simple recording loop
             while True:
                 data = stream.read(CHUNK)
                 all_frames.append(data)
@@ -242,7 +201,7 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
                 current_time = time.time()
                 if current_time - last_visual_update >= visual_update_interval:
                     duration = len(all_frames) * CHUNK / RATE
-                    estimated_size_mb = (len(all_frames) * CHUNK * 4) / (1024 * 1024)  # 32-bit float = 4 bytes
+                    estimated_size_mb = (len(all_frames) * CHUNK * 4) / (1024 * 1024)
                     print(f"\r🎤 Recording... {duration:.1f}s | {estimated_size_mb:.1f}MB", end="", flush=True)
                     last_visual_update = current_time
 
@@ -258,12 +217,45 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
             total_duration = len(audio_data) / RATE
             print(f"📊 Total recording: {total_duration:.1f}s ({len(audio_data)} samples)")
 
-            # Process the entire recording
-            return _process_audio_chunk(audio_data, RATE, mode, recognizer, enable_diarization)
+            # SIMPLE API CALL - SDK handles everything!
+            if enable_diarization:
+                # For diarization, we need to save to a temporary file and use process_file
+                import tempfile
+                import soundfile as sf
+                
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                    temp_path = temp_file.name
+                    sf.write(temp_path, audio_data, RATE)
+                
+                try:
+                    is_translation = (mode == "translation")
+                    result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+                finally:
+                    # Clean up temporary file
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+            else:
+                # For non-diarization, use direct audio data processing
+                is_translation = (mode == "translation")
+                result = recognizer.recognize_audio_data(audio_data, RATE, is_translation=is_translation)
 
-        except Exception as e:
-            print(f"❌ Recording failed: {e}")
-            return None
+            if result:
+                if hasattr(result, "text") and result.text:
+                    print(f"✅ {mode.title()} completed successfully!")
+                    return result
+                elif hasattr(result, "segments") and result.segments:
+                    print(f"✅ {mode.title()} completed successfully!")
+                    print(f"🎭 Speakers detected: {result.num_speakers}")
+                    print(f"📊 Total segments: {len(result.segments)}")
+                    return result
+                else:
+                    print(f"❌ {mode.title()} failed - no text or segments detected")
+                    return None
+            else:
+                print(f"❌ {mode.title()} failed - no result")
+                return None
 
         finally:
             stream.stop_stream()
@@ -277,173 +269,29 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
         print(f"❌ Single microphone processing failed: {e}")
         return None
 
-def _process_audio_chunk(audio_data, sample_rate, mode, recognizer, enable_diarization):
-    """Process a single audio chunk."""
-    try:
-        import tempfile
-        import soundfile as sf
-        
-        # Save to temporary file for processing
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-            temp_path = temp_file.name
-            sf.write(temp_path, audio_data, sample_rate)
 
-        try:
-            # Process the recorded audio
-            if enable_diarization:
-                # Use diarization
-                if mode == "translation":
-                    result = recognizer.translate_file(temp_path, enable_diarization=True)
-                else:
-                    result = recognizer.recognize_file(temp_path, enable_diarization=True)
-            else:
-                # Direct processing without diarization
-                if mode == "translation":
-                    result = recognizer.translate_audio_data(audio_data, sample_rate)
-                else:
-                    result = recognizer.recognize_audio_data(audio_data, sample_rate)
-
-            if result and hasattr(result, "text") and result.text:
-                print(f"✅ {mode.title()} completed successfully!")
-                if hasattr(result, "segments") and result.segments:
-                    print(f"🎭 Speakers detected: {result.num_speakers}")
-                    print(f"📊 Total segments: {len(result.segments)}")
-                return result
-            elif result and hasattr(result, "segments") and result.segments:
-                print(f"✅ {mode.title()} completed successfully!")
-                print(f"🎭 Speakers detected: {result.num_speakers}")
-                print(f"📊 Total segments: {len(result.segments)}")
-                return result
-            else:
-                print(f"❌ {mode.title()} failed - no text detected")
-                return None
-
-        finally:
-            # Clean up temporary file
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-
-    except Exception as e:
-        print(f"❌ Audio processing failed: {e}")
-        return None
-
-def _process_large_audio_in_chunks(audio_data, sample_rate, mode, recognizer, enable_diarization):
-    """Process large audio by splitting into 24MB chunks."""
-    try:
-        import numpy as np
-        
-        # 24MB limit calculation
-        MAX_SAMPLES = int(sample_rate * 390)  # 6.5 minutes
-        chunk_size = MAX_SAMPLES
-        total_chunks = (len(audio_data) + chunk_size - 1) // chunk_size
-        
-        print(f"🔄 Processing {total_chunks} chunks of audio...")
-        
-        all_results = []
-        
-        for i in range(0, len(audio_data), chunk_size):
-            chunk_num = i // chunk_size + 1
-            chunk_audio = audio_data[i:i + chunk_size]
-            chunk_duration = len(chunk_audio) / sample_rate
-            
-            print(f"🔄 Processing chunk {chunk_num}/{total_chunks} ({chunk_duration:.1f}s)...")
-            
-            result = _process_audio_chunk(chunk_audio, sample_rate, mode, recognizer, enable_diarization)
-            
-            if result and hasattr(result, "text") and result.text:
-                all_results.append(result)
-                print(f"✅ Chunk {chunk_num}: {result.text[:100]}{'...' if len(result.text) > 100 else ''}")
-            elif result and hasattr(result, "segments") and result.segments:
-                all_results.append(result)
-                print(f"✅ Chunk {chunk_num}: Diarization completed ({result.num_speakers} speakers)")
-            else:
-                print(f"⚠️  Chunk {chunk_num}: No text detected")
-        
-        if all_results:
-            # Combine all results
-            combined_text = " ".join([r.text for r in all_results if hasattr(r, "text") and r.text])
-            print(f"\n✅ Combined {mode.title()} completed successfully!")
-            print(f"📊 Processed {len(all_results)} chunks")
-            
-            # Create a combined result object
-            from groq_speech.speech_recognizer import SpeechRecognitionResult, ResultReason
-            combined_result = SpeechRecognitionResult(
-                text=combined_text,
-                reason=ResultReason.RecognizedSpeech,
-                confidence=sum(r.confidence for r in all_results if hasattr(r, "confidence")) / len(all_results) if all_results else 0.0
-            )
-            return combined_result
-        else:
-            print(f"❌ No text detected in any chunk")
-            return None
-            
-    except Exception as e:
-        print(f"❌ Large audio processing failed: {e}")
-        return None
-
-def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False, verbose: bool = False):
-    """Continuous microphone transcription with real-time processing and 24MB chunking."""
+def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False):
+    """Continuous microphone transcription - SDK handles VAD and chunking internally."""
     print(f"\n🎤 Continuous Microphone {mode.title()}")
     print("=" * 50)
-    if enable_diarization:
-        print("💡 Continuous transcription with diarization - real-time streaming results")
-    else:
-        print("💡 Continuous transcription mode - real-time streaming results")
     print("💡 Press Ctrl+C to stop")
 
     try:
         import pyaudio
         import numpy as np
-        import soundfile as sf
         import tempfile
         import threading
         import queue
-        import time
 
         # Audio recording parameters
-        CHUNK = 8192  # Further increased buffer size to prevent overflow
+        CHUNK = 8192
         FORMAT = pyaudio.paFloat32
         CHANNELS = 1
         RATE = 16000
-        
-        # 24MB limit calculation for 16kHz, 32-bit float audio
-        # 24MB = 25,165,824 bytes
-        # 32-bit float = 4 bytes per sample
-        # Max samples = 25,165,824 / 4 = 6,291,456 samples
-        # Max duration = 6,291,456 / 16,000 ≈ 393 seconds ≈ 6.5 minutes
-        MAX_SAMPLES = int(RATE * 390)  # Conservative 6.5 minutes
-        MAX_BYTES = 24 * 1024 * 1024  # 24MB in bytes
         MAX_DURATION_SECONDS = 390  # 6.5 minutes
 
         print(f"🎤 Recording continuously...")
-        print(f"💡 Audio will be chunked at 24MB limit ({MAX_SAMPLES/RATE/60:.1f} minutes) for optimal processing")
         print("💡 Press Ctrl+C to stop")
-
-        # Queue for audio processing
-        audio_queue = queue.Queue()
-        processing_active = True
-
-        def audio_processor():
-            """Background thread for processing audio chunks."""
-            while processing_active:
-                try:
-                    # Get audio data from queue with timeout
-                    audio_data, segment_num = audio_queue.get(timeout=1.0)
-                    
-                    # Process the audio chunk
-                    _process_continuous_audio_chunk_async(audio_data, RATE, mode, recognizer, enable_diarization, segment_num)
-                    
-                    audio_queue.task_done()
-                except queue.Empty:
-                    continue
-                except Exception as e:
-                    print(f"❌ Audio processing error: {e}")
-
-        # Start background processing thread
-        processor_thread = threading.Thread(target=audio_processor, daemon=True)
-        processor_thread.start()
 
         p = pyaudio.PyAudio()
         stream = p.open(
@@ -454,81 +302,141 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
             frames_per_buffer=CHUNK,
         )
 
-        chunk_count = 0
         accumulated_audio = []
-        accumulated_bytes = 0
         last_visual_update = time.time()
-        visual_update_interval = 0.5  # Update visual feedback every 0.5 seconds
+        visual_update_interval = 0.5
 
         try:
-            while True:  # Continuous loop until Ctrl+C
-                # Read audio data continuously with error handling
-                try:
-                    data = stream.read(CHUNK, exception_on_overflow=False)
-                except Exception as e:
-                    print(f"⚠️  Audio read error: {e}, continuing...")
-                    continue
-                
-                # Add raw bytes to accumulated audio (more efficient)
+            while True:
+                data = stream.read(CHUNK, exception_on_overflow=False)
                 accumulated_audio.append(data)
-                accumulated_bytes += len(data)
                 
                 # Convert current audio to numpy for VAD analysis
                 audio_bytes = b"".join(accumulated_audio)
                 audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
                 duration = len(audio_array) / RATE
                 
-                # Visual feedback - show audio level and status
+                # Visual feedback using SDK method
                 current_time = time.time()
                 if current_time - last_visual_update >= visual_update_interval:
-                    audio_level = recognizer.vad_service.get_audio_level(audio_array[-RATE:])  # Last 1 second
+                    audio_level = recognizer.get_audio_level(audio_array[-RATE:])  # Last 1 second
                     level_bars = "█" * int(audio_level * 20) + "░" * (20 - int(audio_level * 20))
-                    print(f"\r🎤 Listening... [{level_bars}] {audio_level:.2f} | {duration:.1f}s | {accumulated_bytes/1024/1024:.1f}MB", end="", flush=True)
+                    print(f"\r🎤 Listening... [{level_bars}] {audio_level:.2f} | {duration:.1f}s | {len(audio_bytes)/1024/1024:.1f}MB", end="", flush=True)
                     last_visual_update = current_time
                 
-                # Check if we should create a chunk using VAD
-                should_create, reason = recognizer.vad_service.should_create_chunk(
+                # Check if we should create a chunk using SDK method
+                should_create, reason = recognizer.should_create_chunk(
                     audio_array, RATE, MAX_DURATION_SECONDS
                 )
                 
                 if should_create:
-                    chunk_count += 1
-                    print(f"\n🔄 Chunk {chunk_count} created: {reason}")
-                    log_debug(f"Chunk {chunk_count}: {len(audio_array)} samples, {duration:.1f}s, {accumulated_bytes/1024/1024:.1f}MB")
+                    print(f"\n🔄 Chunk created: {reason}")
                     
-                    # Queue for processing
-                    audio_queue.put((audio_array, chunk_count))
+                    # Trim silence from the end of the chunk for better processing
+                    trimmed_audio = _trim_silence_from_end(audio_array, RATE)
+                    if len(trimmed_audio) < RATE:  # Less than 1 second of audio
+                        print(f"⚠️  Chunk too short after silence trimming ({len(trimmed_audio)/RATE:.1f}s), skipping...")
+                        accumulated_audio = []
+                        continue
+                    
+                    print(f"📊 Processing trimmed chunk: {len(trimmed_audio)/RATE:.1f}s (trimmed from {len(audio_array)/RATE:.1f}s)")
+                    
+                    # SIMPLE API CALL - SDK handles everything!
+                    if enable_diarization:
+                        # For diarization, we need to save to a temporary file and use process_file
+                        import tempfile
+                        import soundfile as sf
+                        
+                        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                            temp_path = temp_file.name
+                            sf.write(temp_path, trimmed_audio, RATE)
+                        
+                        try:
+                            is_translation = (mode == "translation")
+                            result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+                        finally:
+                            # Clean up temporary file
+                            try:
+                                os.unlink(temp_path)
+                            except:
+                                pass
+                    else:
+                        # For non-diarization, use direct audio data processing
+                        is_translation = (mode == "translation")
+                        result = recognizer.recognize_audio_data(trimmed_audio, RATE, is_translation=is_translation)
+
+                    if result:
+                        if hasattr(result, "text") and result.text:
+                            print(f"✅ {mode.title()}: {result.text}")
+                        elif hasattr(result, "segments") and result.segments:
+                            print(f"✅ {mode.title()}: Diarization completed")
+                            print(f"🎭 Speakers: {result.num_speakers}, Segments: {len(result.segments)}")
+                            
+                            # Display individual speaker segments with their text
+                            for i, segment in enumerate(result.segments):
+                                speaker = segment.speaker_id
+                                text = getattr(segment, 'text', '') or getattr(segment, 'transcription', '') or '[No text]'
+                                if text and text.strip():
+                                    print(f"🎤 {speaker}: {text}")
+                                else:
+                                    print(f"🎤 {speaker}: [No text detected]")
                     
                     # Reset accumulated audio
                     accumulated_audio = []
-                    accumulated_bytes = 0
 
         except KeyboardInterrupt:
             print("\n🛑 Stopping continuous recognition...")
-            processing_active = False
             
             # Process any remaining audio
             if accumulated_audio:
-                chunk_count += 1
-                print(f"🔄 Processing final chunk {chunk_count} ({accumulated_bytes/1024/1024:.1f}MB)...")
-                
-                # Convert accumulated bytes to numpy array
+                print("🔄 Processing final chunk...")
                 audio_bytes = b"".join(accumulated_audio)
                 audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
-                duration = len(audio_array) / RATE
-                log_debug(f"Final chunk {chunk_count}: {len(audio_array)} samples, {duration:.1f}s")
                 
-                audio_queue.put((audio_array, chunk_count))
-            
-            # Wait for processing to complete
-            print("⏳ Waiting for final processing to complete...")
-            audio_queue.join()
+                # SIMPLE API CALL - SDK handles everything!
+                if enable_diarization:
+                    # For diarization, we need to save to a temporary file and use process_file
+                    import tempfile
+                    import soundfile as sf
+                    
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                        temp_path = temp_file.name
+                        sf.write(temp_path, audio_array, RATE)
+                    
+                    try:
+                        is_translation = (mode == "translation")
+                        result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+                    finally:
+                        # Clean up temporary file
+                        try:
+                            os.unlink(temp_path)
+                        except:
+                            pass
+                else:
+                    # For non-diarization, use direct audio data processing
+                    is_translation = (mode == "translation")
+                    result = recognizer.recognize_audio_data(audio_array, RATE, is_translation=is_translation)
+
+                if result:
+                    if hasattr(result, "text") and result.text:
+                        print(f"✅ Final {mode.title()}: {result.text}")
+                    elif hasattr(result, "segments") and result.segments:
+                        print(f"✅ Final {mode.title()}: Diarization completed")
+                        print(f"🎭 Speakers: {result.num_speakers}, Segments: {len(result.segments)}")
+                        
+                        # Display individual speaker segments with their text
+                        for i, segment in enumerate(result.segments):
+                            speaker = segment.speaker_id
+                            text = getattr(segment, 'text', '') or getattr(segment, 'transcription', '') or '[No text]'
+                            if text and text.strip():
+                                print(f"🎤 {speaker}: {text}")
+                            else:
+                                print(f"🎤 {speaker}: [No text detected]")
             
             print("✅ Continuous processing completed successfully!")
             return None
 
         finally:
-            processing_active = False
             try:
                 stream.stop_stream()
                 stream.close()
@@ -543,107 +451,25 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
         print(f"❌ Continuous microphone processing failed: {e}")
         return None
 
-def _process_continuous_audio_chunk_async(audio_data, sample_rate, mode, recognizer, enable_diarization, segment_num=None):
-    """Process a single audio chunk for continuous mode asynchronously."""
-    try:
-        import tempfile
-        import soundfile as sf
-        import numpy as np
-        
-        # Check if audio has sufficient volume (simple silence detection)
-        audio_rms = np.sqrt(np.mean(audio_data**2))
-        print(f"🔍 Chunk {segment_num}: Audio RMS = {audio_rms:.6f}, Samples = {len(audio_data)}")
-        
-        if audio_rms < 0.001:  # Very quiet audio, likely silence (lowered threshold)
-            print(f"⚠️  Chunk {segment_num}: Audio too quiet (silence detected, RMS={audio_rms:.6f})")
-            return
-        
-        # Save to temporary file for processing
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-            temp_path = temp_file.name
-            sf.write(temp_path, audio_data, sample_rate)
-
-        try:
-            # Process the recorded audio
-            if enable_diarization:
-                # Use diarization
-                if mode == "translation":
-                    result = recognizer.translate_file(temp_path, enable_diarization=True)
-                else:
-                    result = recognizer.recognize_file(temp_path, enable_diarization=True)
-            else:
-                # Direct processing without diarization
-                if mode == "translation":
-                    result = recognizer.translate_audio_data(audio_data, sample_rate)
-                else:
-                    result = recognizer.recognize_audio_data(audio_data, sample_rate)
-
-            if result and hasattr(result, "text") and result.text and len(result.text.strip()) > 0:
-                segment_info = f"Segment {segment_num}" if segment_num else "Audio"
-                print(f"✅ {segment_info} {mode.title()}: {result.text}")
-                if hasattr(result, "segments") and result.segments:
-                    print(f"🎭 Speakers: {result.num_speakers}, Segments: {len(result.segments)}")
-            elif result and hasattr(result, "segments") and result.segments:
-                segment_info = f"Segment {segment_num}" if segment_num else "Audio"
-                print(f"✅ {segment_info} {mode.title()}: Diarization completed")
-                print(f"🎭 Speakers: {result.num_speakers}, Segments: {len(result.segments)}")
-                
-                # Display individual speaker segments with their text
-                for i, segment in enumerate(result.segments):
-                    speaker = segment.speaker_id
-                    text = getattr(segment, 'text', '') or getattr(segment, 'transcription', '') or '[No text]'
-                    if text and text.strip():
-                        print(f"🎤 {speaker}: {text}")
-                    else:
-                        print(f"🎤 {speaker}: [No text detected]")
-            else:
-                segment_info = f"Segment {segment_num}" if segment_num else "Audio"
-                print(f"⚠️  {segment_info} {mode.title()}: No text detected")
-
-        finally:
-            # Clean up temporary file
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-
-    except Exception as e:
-        segment_info = f"Segment {segment_num}" if segment_num else "Audio"
-        print(f"❌ {segment_info} processing failed: {e}")
 
 def main():
-    """Main function to handle command line arguments and execute the demo."""
+    """Main function - NOW ULTRA SIMPLE!"""
     parser = argparse.ArgumentParser(
-        description="Enhanced Speech Demo with Smart Diarization",
+        description="Clean Speech Demo - Leveraging SDK's Internal Capabilities",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 EXAMPLES:
-    # File-based transcription (default operation, enhanced diarization)
+    # File-based transcription (SDK handles all complexity internally)
     python speech_demo.py --file audio.wav
     
-    # File-based translation (enhanced diarization)
-    python speech_demo.py --file audio.wav --operation translation
+    # File-based translation with diarization
+    python speech_demo.py --file audio.wav --operation translation --diarize
     
-    # Microphone single mode (record until Ctrl+C, then process)
+    # Microphone single mode
     python speech_demo.py --microphone-mode single
     
-    # Microphone single mode with translation
-    python speech_demo.py --microphone-mode single --operation translation
-    
-    # Microphone single mode with diarization
-    python speech_demo.py --microphone-mode single --diarize true
-    
-    # Microphone continuous mode (real-time processing with silence detection)
-    python speech_demo.py --microphone-mode continuous --operation translation --diarize true
-    
-    # File with enhanced diarization (always enabled for files)
-    python speech_demo.py --file audio.wav --diarize true
-    
-    # Production mode (clean output for demos)
-    python speech_demo.py --microphone-mode continuous --diarize true
-    
-    # Debug mode (verbose logging for development/troubleshooting)
-    python speech_demo.py --microphone-mode continuous --diarize true --verbose
+    # Microphone continuous mode
+    python speech_demo.py --microphone-mode continuous --diarize
         """,
     )
 
@@ -651,15 +477,13 @@ EXAMPLES:
         "--operation",
         choices=["transcription", "translation"],
         default="transcription",
-        help="Operation: transcription (speech-to-text) or translation "
-        "(speech-to-text in target language). Defaults to transcription.",
+        help="Operation: transcription or translation",
     )
 
     parser.add_argument(
         "--microphone-mode",
         choices=["single", "continuous"],
-        help="Microphone mode: single (record until Ctrl+C, then process everything) "
-        "or continuous (real-time processing with silence detection)",
+        help="Microphone mode: single or continuous",
     )
 
     parser.add_argument(
@@ -671,24 +495,18 @@ EXAMPLES:
     parser.add_argument(
         "--diarize",
         action="store_true",
-        help="Enable enhanced speaker diarization with smart grouping and "
-        "parallel processing. Defaults to False.",
+        help="Enable speaker diarization",
     )
 
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="Enable verbose debug logging for development and troubleshooting. "
-        "Default: production mode with clean output.",
+        help="Enable verbose debug logging",
     )
 
     args = parser.parse_args()
     
-    # Set global verbose mode
-    global VERBOSE_MODE
-    VERBOSE_MODE = args.verbose
-    
-    # Configure warning display based on verbose mode
+    # Configure warning display
     configure_warnings(args.verbose)
 
     # Validate arguments
@@ -698,11 +516,11 @@ EXAMPLES:
     if args.file and args.microphone_mode:
         parser.error("Cannot specify both --file and --microphone-mode")
 
-    # Validate environment (only check HF_TOKEN if diarization is needed)
+    # Validate environment
     if not validate_environment(args.diarize):
         sys.exit(1)
 
-    # Create speech recognizer
+    # Create speech recognizer - SIMPLE!
     try:
         speech_config = SpeechConfig()
         
@@ -718,16 +536,15 @@ EXAMPLES:
         print(f"❌ Failed to initialize speech recognizer: {e}")
         sys.exit(1)
 
-    # Process based on arguments
+    # Process based on arguments - SIMPLE API CALLS!
     try:
         if args.file:
-            # For file processing, use diarization based on --diarize parameter
-            result = process_audio_file(args.file, args.operation, recognizer, args.diarize, args.verbose)
+            result = process_audio_file(args.file, args.operation, recognizer, args.diarize)
         else:  # microphone
             if args.microphone_mode == "single":
-                result = process_microphone_single(args.operation, recognizer, args.diarize, args.verbose)
+                result = process_microphone_single(args.operation, recognizer, args.diarize)
             else:  # continuous
-                result = process_microphone_continuous(args.operation, recognizer, args.diarize, args.verbose)
+                result = process_microphone_continuous(args.operation, recognizer, args.diarize)
 
         if result:
             print(f"\n✅ Processing completed successfully!")
@@ -736,19 +553,13 @@ EXAMPLES:
                 print(f"📊 Speaker Segment Groups: {len(result.segments)}")
                 for i, segment in enumerate(result.segments):
                     speaker = segment.speaker_id
-                    text = (
-                        segment.text
-                        if hasattr(segment, "text")
-                        else "[No text]"
-                    )
-
+                    text = getattr(segment, "text", "") or "[No text]"
                     print(f"\n🎤 {speaker}:")
                     print(f"      {text}")
-
             elif hasattr(result, "text"):
                 print(f"📝 Text: {result.text}")
         elif args.microphone_mode == "continuous":
-            # Continuous mode returns None by design (real-time processing)
+            # Continuous mode returns None by design
             print(f"\n✅ Continuous processing completed successfully!")
         else:
             print(f"\n❌ Processing failed")
@@ -760,6 +571,7 @@ EXAMPLES:
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     exit(main())

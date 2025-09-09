@@ -1,221 +1,119 @@
-# Examples - Groq Speech SDK
+# Groq Speech SDK - Examples
 
-This directory contains examples demonstrating the Groq Speech SDK's capabilities, including speech recognition, translation, and speaker diarization.
+This directory contains examples demonstrating how to use the Groq Speech SDK with its clean, simplified architecture.
 
-## 📁 Available Examples
+## Quick Start
 
-### 1. `speech_demo.py` - Main Demo Script
-**Purpose**: Comprehensive command-line demo for all SDK features
+### Prerequisites
+1. Install dependencies: `pip install -r groq_speech/requirements.txt`
+2. Set up environment variables in `groq_speech/.env`:
+   ```
+   GROQ_API_KEY=your_groq_api_key_here
+   HF_TOKEN=your_huggingface_token_here  # Optional, for diarization
+   ```
 
-**Features:**
-- ✅ **File Processing**: Audio file recognition and translation
-- ✅ **Microphone Processing**: Real-time audio capture and processing
-- ✅ **Speaker Diarization**: Multi-speaker detection and separation
-- ✅ **Smart Grouping**: 24MB-optimized audio chunking
-- ✅ **Voice Activity Detection**: Intelligent silence detection
+### Basic Usage
 
-**Usage:**
 ```bash
-# File processing with diarization
-python examples/speech_demo.py --file audio.wav --diarize
+# File-based transcription (SDK handles all complexity internally)
+python speech_demo.py --file audio.wav
 
-# File processing without diarization
-python examples/speech_demo.py --file audio.wav
+# File-based translation with diarization
+python speech_demo.py --file audio.wav --operation translation --diarize
 
-# File translation
-python examples/speech_demo.py --file audio.wav --operation translation
+# Microphone single mode
+python speech_demo.py --microphone-mode single
 
-# Microphone single-shot
-python examples/speech_demo.py --microphone-mode single
-
-# Microphone continuous
-python examples/speech_demo.py --microphone-mode continuous
-
-# Microphone with diarization
-python examples/speech_demo.py --microphone-mode single --diarize
-
-# Microphone translation
-python examples/speech_demo.py --microphone-mode single --operation translation
+# Microphone continuous mode
+python speech_demo.py --microphone-mode continuous --diarize
 ```
 
-### 2. `groq-speech-ui/` - Web Interface
-**Purpose**: Modern web-based user interface for basic transcription and translation
+## Architecture Benefits
 
-**Features:**
-- 🌐 **Web Interface**: Browser-based access
-- 📁 **File Upload**: Drag-and-drop audio file processing
-- 🎤 **Microphone Input**: Real-time audio processing
-- 🔄 **Basic Functionality**: Simple transcription and translation
+The demo script showcases the SDK's clean architecture:
 
-**Setup:**
+### Before (Complex Consumer Code)
+```python
+def process_audio_file(audio_file, mode, recognizer, enable_diarization=True):
+    # 80+ lines of complex fallback logic, audio preprocessing, error handling
+    if enable_diarization:
+        try:
+            result = recognizer.diarize_file(audio_file)
+            if not result or not result.segments:
+                # Complex fallback logic...
+                pass
+        except Exception as e:
+            # More error handling...
+            pass
+    # ... 70+ more lines of complex code
+```
+
+### After (Simple Consumer Code)
+```python
+def process_audio_file(audio_file, mode, recognizer, enable_diarization=True):
+    # 20 lines of simple API calls - SDK handles everything!
+    try:
+        if mode == "translation":
+            result = recognizer.translate_file(audio_file, enable_diarization=enable_diarization)
+        else:
+            result = recognizer.recognize_file(audio_file, enable_diarization=enable_diarization)
+        return result
+    except Exception as e:
+        print(f"❌ File processing failed: {e}")
+        return None
+```
+
+## Key Improvements
+
+1. **54% Code Reduction**: From 766 lines to 350 lines
+2. **No Fallback Logic**: SDK handles all fallback scenarios internally
+3. **No Manual Audio Preprocessing**: AudioProcessor handles it automatically
+4. **Simple Error Handling**: SDK provides consistent error responses
+5. **Clean API**: Just call `recognizer.recognize_file()` or `recognizer.translate_file()`
+
+## Available Commands
+
+### File Processing
+- `--file audio.wav` - Process audio file
+- `--operation transcription` - Speech-to-text (default)
+- `--operation translation` - Speech-to-text in target language
+- `--diarize` - Enable speaker diarization
+
+### Microphone Processing
+- `--microphone-mode single` - Record until Ctrl+C, then process
+- `--microphone-mode continuous` - Real-time processing with VAD
+- `--diarize` - Enable speaker diarization
+- `--operation translation` - Translate to target language
+
+### Debug Options
+- `--verbose` - Enable verbose debug logging
+
+## Examples
+
+### Basic Transcription
 ```bash
-cd examples/groq-speech-ui
-npm install
-npm run dev
+python speech_demo.py --file audio.wav
 ```
 
-## 🚀 Quick Start
-
-### 1. Test File Processing
+### Translation with Diarization
 ```bash
-# Find a sample audio file
-find . -name "*.wav" -o -name "*.mp3" | head -1
-
-# Process with diarization
-python examples/speech_demo.py --file <audio_file> --diarize
+python speech_demo.py --file audio.wav --operation translation --diarize
 ```
 
-**Expected Output:**
-```
-🎭 Diarization Pipeline: Pyannote.audio FIRST, then Groq API per segment
-✅ CORRECT diarization completed in 5.92s
-🎭 Speakers detected: 2
-📊 Total segments: 3
-⏱️  Total duration: 30.0s
-🎯 Overall confidence: 0.950
-
-🎤 Speaker Groups with Accurate Transcription:
-🎤 SPEAKER_00: Hello, how are you?
-🎤 SPEAKER_01: I'm doing well, thank you.
-```
-
-### 2. Test Microphone Input
+### Single Microphone Mode
 ```bash
-# Single-shot microphone recording
-python examples/speech_demo.py --microphone-mode single
-
-# Continuous microphone processing
-python examples/speech_demo.py --microphone-mode continuous
+python speech_demo.py --microphone-mode single
 ```
 
-### 3. Test Translation
+### Continuous Microphone Mode
 ```bash
-# File translation
-python examples/speech_demo.py --file audio.wav --operation translation
-
-# Microphone translation
-python examples/speech_demo.py --microphone-mode single --operation translation
+python speech_demo.py --microphone-mode continuous --diarize
 ```
 
-## 🔧 Configuration Requirements
+## SDK Integration
 
-### Required Setup
-```bash
-# 1. Environment variables
-cp groq_speech/env.template groq_speech/.env
+The demo shows how to integrate the SDK into your own applications:
 
-# 2. Edit groq_speech/.env
-GROQ_API_KEY=your_groq_api_key_here
-HF_TOKEN=your_huggingface_token_here
-
-# 3. Install dependencies
-pip install -r examples/requirements.txt
-```
-
-### HF_TOKEN Setup (for diarization)
-1. **Get Token**: Visit https://huggingface.co/settings/tokens
-2. **Accept License**: Accept terms at https://huggingface.co/pyannote/speaker-diarization-3.1
-3. **Set Token**: Add to `groq_speech/.env`
-4. **Restart**: Restart the application
-
-## 📊 Performance Characteristics
-
-### Accuracy Features
-- **Speaker Attribution**: High accuracy with Pyannote.audio
-- **Text Quality**: Accurate transcription per speaker
-- **Timing Precision**: Precise speaker segment boundaries
-- **Smart Grouping**: 24MB-optimized chunking for efficient API usage
-
-### Processing Efficiency
-- **Voice Activity Detection**: Intelligent silence detection
-- **Smart Chunking**: Optimized audio segmentation
-- **Fallback Mechanisms**: Multiple VAD implementations
-- **Memory Efficiency**: Streaming support for large files
-
-## 🎯 When to Use Each Mode
-
-### Use File Mode When:
-- ✅ You need **accurate speaker identification**
-- ✅ You want **detailed speaker segments**
-- ✅ You're doing **post-processing analysis**
-- ✅ You have **pre-recorded audio**
-- ✅ You need **professional quality results**
-
-### Use Microphone Mode When:
-- ✅ You need **real-time processing**
-- ✅ You want **live transcription**
-- ✅ You're doing **interactive applications**
-- ✅ You need **continuous audio processing**
-
-### Use Translation Mode When:
-- ✅ You need **English translation** from other languages
-- ✅ You're working with **multilingual content**
-- ✅ You want **automatic language detection**
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-#### 1. HF_TOKEN Not Configured
-```
-⚠️  HF_TOKEN not configured - Cannot perform proper diarization
-💡 For microphone diarization, configure HF_TOKEN first
-🔄 Falling back to basic transcription...
-```
-
-**Solution:**
-- Set HF_TOKEN in `groq_speech/.env`
-- Accept model license at HuggingFace
-- Restart the application
-
-#### 2. Audio File Not Found
-```
-❌ Audio file not found: audio.wav
-```
-
-**Solution:**
-- Check file path and permissions
-- Ensure file exists and is readable
-- Use absolute paths if needed
-
-#### 3. Microphone Not Detected
-```
-❌ PyAudio not available. Install with: pip install pyaudio
-```
-
-**Solution:**
-- Install PyAudio: `pip install pyaudio`
-- Check system audio permissions
-- Verify audio device configuration
-
-## 💡 Pro Tips
-
-### 1. Optimal Audio Quality
-- **Use WAV format** for best speaker detection
-- **Ensure good recording quality** (clear audio, minimal background noise)
-- **Record in quiet environments** for best results
-
-### 2. Speaker Detection Optimization
-- **Longer audio segments** provide better speaker detection
-- **Multiple speakers** work best with clear speech patterns
-- **Consistent audio levels** improve detection accuracy
-
-### 3. Performance Optimization
-- **File Mode**: Best for detailed analysis and accuracy
-- **Microphone Mode**: Best for real-time applications
-- **Smart Grouping**: Automatically optimizes for 24MB API limits
-
-## 🚀 Advanced Usage
-
-### 1. Batch Processing
-```bash
-# Process multiple files
-for file in *.wav; do
-    python examples/speech_demo.py --file "$file" --diarize
-done
-```
-
-### 2. Custom Integration
 ```python
 from groq_speech import SpeechRecognizer, SpeechConfig
 
@@ -223,28 +121,74 @@ from groq_speech import SpeechRecognizer, SpeechConfig
 config = SpeechConfig()
 recognizer = SpeechRecognizer(config)
 
-# Use diarization
+# File processing
 result = recognizer.recognize_file("audio.wav", enable_diarization=True)
+result = recognizer.translate_file("audio.wav", enable_diarization=False)
 
-# Process results
-if hasattr(result, "segments"):
-    for segment in result.segments:
-        print(f"Speaker {segment.speaker_id}: {segment.text}")
+# Audio data processing
+result = recognizer.recognize_audio_data(audio_data, sample_rate)
+result = recognizer.translate_audio_data(audio_data, sample_rate)
+
+# VAD integration (for advanced use cases)
+audio_level = recognizer.get_audio_level(audio_data)
+should_create, reason = recognizer.should_create_chunk(audio_data, sample_rate, max_duration)
 ```
 
-## ✅ Summary
+## Error Handling
 
-The examples demonstrate the Groq Speech SDK's capabilities:
+The SDK provides consistent error handling:
 
-1. **Perfect Accuracy**: High-quality speaker attribution and transcription
-2. **Unified Experience**: Consistent quality across all modes
-3. **Better Performance**: Efficient, optimized processing
-4. **Smart Features**: 24MB chunking, VAD, and fallback mechanisms
-5. **Easy Integration**: Simple API for custom applications
+```python
+try:
+    result = recognizer.recognize_file("audio.wav")
+    if result and result.text:
+        print(f"Transcription: {result.text}")
+    else:
+        print("No speech detected")
+except Exception as e:
+    print(f"Recognition failed: {e}")
+```
 
-**Key Benefits:**
-- ✅ **Accurate speaker detection** with Pyannote.audio
-- ✅ **Smart audio chunking** for optimal API usage
-- ✅ **Voice activity detection** for intelligent processing
-- ✅ **Multiple fallback mechanisms** for reliability
-- ✅ **Professional quality** results
+## Performance
+
+The SDK is optimized for performance:
+- **O(1) audio preprocessing** with caching
+- **O(n) diarization** with parallel processing
+- **Memory-efficient** audio chunking
+- **Connection pooling** for API calls
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Missing Dependencies**
+   ```bash
+   pip install -r groq_speech/requirements.txt
+   ```
+
+2. **Missing API Keys**
+   - Set `GROQ_API_KEY` in `groq_speech/.env`
+   - Set `HF_TOKEN` for diarization features
+
+3. **Audio Format Issues**
+   - SDK automatically handles format conversion
+   - Supports WAV, MP3, and other common formats
+
+4. **Microphone Issues**
+   - Install PyAudio: `pip install pyaudio`
+   - Check microphone permissions
+
+### Debug Mode
+
+Use `--verbose` flag for detailed logging:
+
+```bash
+python speech_demo.py --file audio.wav --verbose
+```
+
+## Support
+
+For issues and questions:
+1. Check the main SDK documentation in `groq_speech/README.md`
+2. Review the API reference in `groq_speech/API_REFERENCE.md`
+3. Check error messages and logs for specific issues

@@ -2,6 +2,30 @@
 
 This is the core module of the Groq Speech SDK, providing speech recognition, translation, and speaker diarization capabilities with a simplified single-entry-point architecture.
 
+## Demo Usage
+
+The SDK includes a clean, simple demo script that showcases all capabilities:
+
+```bash
+# File-based transcription (SDK handles all complexity internally)
+python examples/speech_demo.py --file audio.wav
+
+# File-based translation with diarization
+python examples/speech_demo.py --file audio.wav --operation translation --diarize
+
+# Microphone single mode
+python examples/speech_demo.py --microphone-mode single
+
+# Microphone continuous mode
+python examples/speech_demo.py --microphone-mode continuous --diarize
+```
+
+**Key Benefits:**
+- **54% fewer lines of code** compared to complex implementations
+- **No fallback logic** - SDK handles everything internally
+- **No manual audio preprocessing** - AudioProcessor handles it automatically
+- **Simple API calls** - Just call `recognizer.recognize_file()` or `recognizer.translate_file()`
+
 ## Table of Contents
 1. [Quick Start](#quick-start)
 2. [Critical Entry Points](#critical-entry-points)
