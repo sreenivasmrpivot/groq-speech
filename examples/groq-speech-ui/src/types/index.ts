@@ -19,6 +19,26 @@ export interface RecognitionResult {
     }>;
     timing_metrics?: TimingMetrics;
     timestamp: string;
+    is_translation?: boolean;
+    enable_diarization?: boolean;
+    // Optional diarization properties
+    segments?: DiarizationSegment[];
+    num_speakers?: number;
+}
+
+export interface DiarizationSegment {
+    speaker_id: string;
+    text: string;
+    start_time: number;
+    end_time: number;
+}
+
+export interface DiarizationResult {
+    segments: DiarizationSegment[];
+    num_speakers: number;
+    is_translation: boolean;
+    enable_diarization: boolean;
+    timestamp: string;
 }
 
 export interface PerformanceMetrics {
@@ -34,8 +54,9 @@ export interface PerformanceMetrics {
 }
 
 export interface RecognitionMode {
-    type: 'single' | 'continuous';
+    type: 'single' | 'continuous' | 'file';
     operation: 'transcription' | 'translation';
+    enable_diarization?: boolean;
 }
 
 export interface AudioConfig {
@@ -57,9 +78,16 @@ export interface ModelConfig {
 }
 
 export interface WebSocketMessage {
-    type: string;
+    type: 'recognition_started' | 'recognition_stopped' | 'recognition_result' | 'diarization_result' | 'single_recognition_started' | 'error' | 'pong';
     data?: unknown;
     error?: string;
+    text?: string;
+    confidence?: number;
+    language?: string;
+    is_translation?: boolean;
+    enable_diarization?: boolean;
+    segments?: DiarizationSegment[];
+    num_speakers?: number;
 }
 
 export interface RecognitionSession {

@@ -28,7 +28,6 @@ from groq_speech import (
     SpeechConfig,
     SpeechRecognizer,
     ResultReason,
-    Config,
 )
 
 
@@ -45,6 +44,7 @@ class RecognitionRequest(BaseModel):
     enable_language_detection: bool = Field(
         True, description="Enable automatic language detection"
     )
+    enable_diarization: bool = Field(False, description="Enable speaker diarization")
 
 
 class RecognitionResponse(BaseModel):
@@ -55,6 +55,8 @@ class RecognitionResponse(BaseModel):
     confidence: Optional[float] = None
     language: Optional[str] = None
     timestamps: Optional[List[Dict[str, Any]]] = None
+    segments: Optional[List[Dict[str, Any]]] = None
+    num_speakers: Optional[int] = None
     error: Optional[str] = None
 
 
@@ -77,7 +79,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     print("🚀 Starting Groq Speech API Server...")
     try:
-        Config.get_api_key()
+        SpeechConfig.get_api_key()
         print("✅ API key validated")
     except ValueError as e:
         print(f"❌ API key error: {e}")
@@ -140,7 +142,7 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     try:
-        api_key_configured = bool(Config.get_api_key())
+        api_key_configured = bool(SpeechConfig.get_api_key())
     except ValueError:
         api_key_configured = False
 
@@ -164,6 +166,7 @@ async def recognize_speech(request: RecognitionRequest):
         print(f"🔧 Enable timestamps: {request.enable_timestamps}")
         print(f"🌍 Target language: {request.target_language}")
         print(f"🔍 Enable language detection: {request.enable_language_detection}")
+        print(f"🎭 Enable diarization: {request.enable_diarization}")
 
         # Setup speech configuration - EXACTLY like CLI
         speech_config = get_speech_config(
@@ -175,28 +178,68 @@ async def recognize_speech(request: RecognitionRequest):
         # Create recognizer - EXACTLY like CLI
         recognizer = SpeechRecognizer(speech_config)
 
-        # For REST API, we use recognize_audio_data() like CLI does for microphone input
-        # This ensures EXACTLY the same processing as CLI
+        # Decode audio data
         import base64
         import numpy as np
+        import tempfile
+        import soundfile as sf
 
         audio_bytes = base64.b64decode(request.audio_data)
         audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
         audio_array_float = audio_array.astype(np.float32) / 32768.0
 
         print(f"📊 Decoded audio: {len(audio_bytes)} bytes, {len(audio_array)} samples")
-        print(
-            f"🎵 Audio range: {audio_array_float.min():.4f} to {audio_array_float.max():.4f}"
-        )
+        print(f"🎵 Audio range: {audio_array_float.min():.4f} to {audio_array_float.max():.4f}")
 
-        # Use recognize_audio_data for base64 data - EXACTLY like CLI microphone mode
-        print("🎤 Calling groq_speech.recognize_audio_data()...")
-        print("🔍 This is the EXACT same call as CLI microphone mode")
-        print("🌍 Language detection is enabled by default in SpeechConfig")
-        result = recognizer.recognize_audio_data(audio_array_float)
-        print(f"🎯 groq_speech result: {result.reason}")
+        # Process based on diarization requirement
+        if request.enable_diarization:
+            # For diarization, save to temp file and use process_file
+            print("🎭 Processing with diarization...")
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_path = temp_file.name
+                sf.write(temp_path, audio_array_float, 16000)
+            
+            try:
+                result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=False)
+            finally:
+                # Clean up temporary file
+                try:
+                    import os
+                    os.unlink(temp_path)
+                except:
+                    pass
+        else:
+            # For non-diarization, use direct audio data processing
+            print("🎤 Processing without diarization...")
+            result = recognizer.recognize_audio_data(audio_array_float, is_translation=False)
 
-        if result.reason == ResultReason.RecognizedSpeech:
+        # Handle diarization result
+        if hasattr(result, "segments") and result.segments:
+            print(f"✅ Diarization successful: {len(result.segments)} segments, {result.num_speakers} speakers")
+            
+            # Convert segments to API format
+            segments_data = []
+            for segment in result.segments:
+                segment_data = {
+                    "speaker_id": segment.speaker_id,
+                    "text": getattr(segment, 'text', '') or getattr(segment, 'transcription', '') or '[No text]',
+                    "start_time": getattr(segment, 'start_time', 0),
+                    "end_time": getattr(segment, 'end_time', 0)
+                }
+                segments_data.append(segment_data)
+
+            return RecognitionResponse(
+                success=True,
+                text=None,  # No single text for diarization
+                confidence=None,
+                language=result.language if hasattr(result, 'language') else None,
+                timestamps=None,
+                segments=segments_data,
+                num_speakers=result.num_speakers
+            )
+
+        # Handle regular recognition result
+        elif result.reason == ResultReason.RecognizedSpeech:
             print(f"✅ Recognition successful: '{result.text}'")
             print(f"🎯 Confidence: {result.confidence}")
             print(f"🌍 Language: {result.language}")
@@ -207,6 +250,8 @@ async def recognize_speech(request: RecognitionRequest):
                 confidence=result.confidence,
                 language=result.language,
                 timestamps=(result.timestamps if request.enable_timestamps else None),
+                segments=None,
+                num_speakers=None
             )
         elif result.reason == ResultReason.NoMatch:
             print("❌ No speech detected in audio")
@@ -214,15 +259,12 @@ async def recognize_speech(request: RecognitionRequest):
         else:
             print(f"❌ Recognition failed: {result.reason}")
             if hasattr(result, "cancellation_details") and result.cancellation_details:
-                print(
-                    f"🔍 Cancellation details: {result.cancellation_details.error_details}"
-                )
+                print(f"🔍 Cancellation details: {result.cancellation_details.error_details}")
             return RecognitionResponse(success=False, error="Recognition failed")
 
     except Exception as e:
         print(f"💥 Error in REST API recognition: {e}")
         import traceback
-
         traceback.print_exc()
         return RecognitionResponse(success=False, error=str(e))
 
@@ -233,6 +275,10 @@ async def translate_speech(request: RecognitionRequest):
     try:
         if not request.audio_data:
             raise HTTPException(status_code=400, detail="Audio data is required")
+
+        print(f"🔀 Translation API: Received audio data request")
+        print(f"📊 Audio data length: {len(request.audio_data)} characters")
+        print(f"🎭 Enable diarization: {request.enable_diarization}")
 
         # Setup speech configuration for translation - EXACTLY like CLI
         speech_config = get_speech_config(
@@ -248,25 +294,76 @@ async def translate_speech(request: RecognitionRequest):
         # Create recognizer - EXACTLY like CLI (AFTER enabling translation)
         recognizer = SpeechRecognizer(speech_config)
 
-        # Convert base64 audio data
+        # Decode audio data
         import base64
         import numpy as np
+        import tempfile
+        import soundfile as sf
 
         audio_bytes = base64.b64decode(request.audio_data)
         audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
         audio_array_float = audio_array.astype(np.float32) / 32768.0
 
-        # Perform translation - EXACTLY like CLI
-        print("🎤 Calling groq_speech.recognize_audio_data() for translation...")
-        result = recognizer.recognize_audio_data(audio_array_float)
+        print(f"📊 Decoded audio: {len(audio_bytes)} bytes, {len(audio_array)} samples")
 
-        if result.reason == ResultReason.RecognizedSpeech:
+        # Process based on diarization requirement
+        if request.enable_diarization:
+            # For diarization, save to temp file and use process_file
+            print("🎭 Processing translation with diarization...")
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_path = temp_file.name
+                sf.write(temp_path, audio_array_float, 16000)
+            
+            try:
+                result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=True)
+            finally:
+                # Clean up temporary file
+                try:
+                    import os
+                    os.unlink(temp_path)
+                except:
+                    pass
+        else:
+            # For non-diarization, use direct audio data processing
+            print("🔀 Processing translation without diarization...")
+            result = recognizer.recognize_audio_data(audio_array_float, is_translation=True)
+
+        # Handle diarization result
+        if hasattr(result, "segments") and result.segments:
+            print(f"✅ Translation diarization successful: {len(result.segments)} segments, {result.num_speakers} speakers")
+            
+            # Convert segments to API format
+            segments_data = []
+            for segment in result.segments:
+                segment_data = {
+                    "speaker_id": segment.speaker_id,
+                    "text": getattr(segment, 'text', '') or getattr(segment, 'transcription', '') or '[No text]',
+                    "start_time": getattr(segment, 'start_time', 0),
+                    "end_time": getattr(segment, 'end_time', 0)
+                }
+                segments_data.append(segment_data)
+
+            return RecognitionResponse(
+                success=True,
+                text=None,  # No single text for diarization
+                confidence=None,
+                language=result.language if hasattr(result, 'language') else None,
+                timestamps=None,
+                segments=segments_data,
+                num_speakers=result.num_speakers
+            )
+
+        # Handle regular translation result
+        elif result.reason == ResultReason.RecognizedSpeech:
+            print(f"✅ Translation successful: '{result.text}'")
             return RecognitionResponse(
                 success=True,
                 text=result.text,
                 confidence=result.confidence,
                 language=result.language,
                 timestamps=(result.timestamps if request.enable_timestamps else None),
+                segments=None,
+                num_speakers=None
             )
         elif result.reason == ResultReason.NoMatch:
             return RecognitionResponse(success=False, error="No speech detected")
@@ -274,6 +371,9 @@ async def translate_speech(request: RecognitionRequest):
             return RecognitionResponse(success=False, error="Translation failed")
 
     except Exception as e:
+        print(f"💥 Error in REST API translation: {e}")
+        import traceback
+        traceback.print_exc()
         return RecognitionResponse(success=False, error=str(e))
 
 
@@ -322,8 +422,15 @@ async def websocket_recognition(websocket: WebSocket):
                     await handle_start_recognition(session_id, data)
                 elif message_type == "stop_recognition":
                     await handle_stop_recognition(session_id)
+                elif message_type == "single_recognition":
+                    await handle_single_recognition(session_id, data)
+                elif message_type == "file_recognition":
+                    await handle_file_recognition(session_id, data)
                 elif message_type == "ping":
-                    await websocket.send_text(json.dumps({"type": "pong"}))
+                    try:
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                    except Exception as e:
+                        print(f"❌ Error sending pong: {e}")
                 else:
                     print(f"❌ Unknown message type: {message_type}")
 
@@ -331,9 +438,12 @@ async def websocket_recognition(websocket: WebSocket):
                 print("❌ Invalid JSON message")
             except Exception as e:
                 print(f"❌ Error processing message: {e}")
-                await websocket.send_text(
-                    json.dumps({"type": "error", "error": str(e)})
-                )
+                try:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "error": str(e)})
+                    )
+                except Exception as send_error:
+                    print(f"❌ Error sending error message: {send_error}")
 
     except WebSocketDisconnect:
         print(f"🔌 WebSocket disconnected: {session_id}")
@@ -378,34 +488,48 @@ async def process_result_queue(session_id: str):
                         print(f"📝 Recognition result: {data.text}")
 
                         # Check if WebSocket is still open before sending
-                        if websocket.client_state.value == 1:  # WebSocket.OPEN
-                            # Send result to frontend
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "recognition_result",
-                                        "text": data.text,
-                                        "confidence": data.confidence,
-                                        "language": data.language,
-                                        "timestamps": (
-                                            data.timestamps
-                                            if hasattr(data, "timestamps")
-                                            else None
-                                        ),
-                                    }
+                        try:
+                            if websocket.client_state.value == 1:  # WebSocket.OPEN
+                                # Send result to frontend
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "recognition_result",
+                                            "data": {
+                                                "text": data.text,
+                                                "confidence": data.confidence,
+                                                "language": data.language,
+                                                "timestamps": (
+                                                    data.timestamps
+                                                    if hasattr(data, "timestamps")
+                                                    else None
+                                                ),
+                                                "is_translation": False,
+                                                "enable_diarization": False
+                                            }
+                                        }
+                                    )
                                 )
-                            )
+                        except Exception as e:
+                            print(f"❌ Error sending recognition result: {e}")
+                            break
                     elif data.reason == ResultReason.NoMatch:
                         print("❌ No speech detected")
-                        if websocket.client_state.value == 1:  # WebSocket.OPEN
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "no_speech",
-                                        "message": "No speech detected",
-                                    }
+                        try:
+                            if websocket.client_state.value == 1:  # WebSocket.OPEN
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "no_speech",
+                                            "data": {
+                                                "message": "No speech detected",
+                                            }
+                                        }
+                                    )
                                 )
-                            )
+                        except Exception as e:
+                            print(f"❌ Error sending no speech message: {e}")
+                            break
 
                 elif event_type == "canceled":
                     if (
@@ -417,36 +541,52 @@ async def process_result_queue(session_id: str):
                         error_msg = "Recognition canceled"
 
                     print(f"❌ Recognition canceled: {error_msg}")
-                    if websocket.client_state.value == 1:  # WebSocket.OPEN
-                        await websocket.send_text(
-                            json.dumps(
-                                {"type": "recognition_canceled", "error": error_msg}
+                    try:
+                        if websocket.client_state.value == 1:  # WebSocket.OPEN
+                            await websocket.send_text(
+                                json.dumps(
+                                    {"type": "recognition_canceled", "data": {"error": error_msg}}
+                                )
                             )
-                        )
+                    except Exception as e:
+                        print(f"❌ Error sending cancellation message: {e}")
+                        break
 
                 elif event_type == "session_started":
                     print(f"🎬 Recognition session started for: {session_id}")
-                    if websocket.client_state.value == 1:  # WebSocket.OPEN
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "type": "session_started",
-                                    "message": "Recognition session started",
-                                }
+                    try:
+                        if websocket.client_state.value == 1:  # WebSocket.OPEN
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "session_started",
+                                        "data": {
+                                            "message": "Recognition session started",
+                                        }
+                                    }
+                                )
                             )
-                        )
+                    except Exception as e:
+                        print(f"❌ Error sending session started message: {e}")
+                        break
 
                 elif event_type == "session_stopped":
                     print(f"🏁 Recognition session stopped for: {session_id}")
-                    if websocket.client_state.value == 1:  # WebSocket.OPEN
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "type": "session_stopped",
-                                    "message": "Recognition session stopped",
-                                }
+                    try:
+                        if websocket.client_state.value == 1:  # WebSocket.OPEN
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "session_stopped",
+                                        "data": {
+                                            "message": "Recognition session stopped",
+                                        }
+                                    }
+                                )
                             )
-                        )
+                    except Exception as e:
+                        print(f"❌ Error sending session stopped message: {e}")
+                        break
 
             except Exception as e:
                 print(f"❌ Error processing result from queue: {e}")
@@ -468,6 +608,7 @@ async def handle_start_recognition(session_id: str, data: dict):
 
         # Get recognition parameters
         is_translation = data.get("is_translation", False)
+        enable_diarization = data.get("enable_diarization", False)
         target_language = data.get("target_language", "en")
 
         # Setup speech configuration - EXACTLY like CLI
@@ -538,24 +679,32 @@ async def handle_start_recognition(session_id: str, data: dict):
         asyncio.create_task(process_result_queue(session_id))
 
         # Send success message
-        await websocket.send_text(
-            json.dumps(
-                {
-                    "type": "recognition_started",
-                    "message": "Continuous recognition started",
-                }
+        try:
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "recognition_started",
+                        "data": {
+                            "message": "Continuous recognition started",
+                        }
+                    }
+                )
             )
-        )
+        except Exception as e:
+            print(f"❌ Error sending recognition started message: {e}")
 
         print(f"✅ Continuous recognition started for session: {session_id}")
 
     except Exception as e:
         print(f"❌ Error starting recognition: {e}")
-        await websocket.send_text(
-            json.dumps(
-                {"type": "error", "error": f"Failed to start recognition: {str(e)}"}
+        try:
+            await websocket.send_text(
+                json.dumps(
+                    {"type": "error", "data": {"error": f"Failed to start recognition: {str(e)}"}}
+                )
             )
-        )
+        except Exception as send_error:
+            print(f"❌ Error sending error message: {send_error}")
 
 
 async def handle_stop_recognition(session_id: str):
@@ -572,24 +721,32 @@ async def handle_stop_recognition(session_id: str):
             session["is_recording"] = False
 
             # Check if WebSocket is still open before sending
-            if websocket.client_state.value == 1:  # WebSocket.OPEN
-                await websocket.send_text(
-                    json.dumps(
-                        {
-                            "type": "recognition_stopped",
-                            "message": "Continuous recognition stopped",
-                        }
+            try:
+                if websocket.client_state.value == 1:  # WebSocket.OPEN
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "recognition_stopped",
+                                "data": {
+                                    "message": "Continuous recognition stopped",
+                                }
+                            }
+                        )
                     )
-                )
+            except Exception as e:
+                print(f"❌ Error sending recognition stopped message: {e}")
 
             print(f"✅ Continuous recognition stopped for session: {session_id}")
         else:
-            if websocket.client_state.value == 1:  # WebSocket.OPEN
-                await websocket.send_text(
-                    json.dumps(
-                        {"type": "error", "error": "No active recognition session"}
+            try:
+                if websocket.client_state.value == 1:  # WebSocket.OPEN
+                    await websocket.send_text(
+                        json.dumps(
+                            {"type": "error", "data": {"error": "No active recognition session"}}
+                        )
                     )
-                )
+            except Exception as e:
+                print(f"❌ Error sending no active session message: {e}")
 
     except Exception as e:
         print(f"❌ Error stopping recognition: {e}")
@@ -600,12 +757,198 @@ async def handle_stop_recognition(session_id: str):
                     json.dumps(
                         {
                             "type": "error",
-                            "error": f"Failed to stop recognition: {str(e)}",
+                            "data": {"error": f"Failed to stop recognition: {str(e)}"},
                         }
                     )
                 )
-        except:
-            pass  # WebSocket already closed
+        except Exception as send_error:
+            print(f"❌ Error sending stop error message: {send_error}")
+
+
+async def handle_single_recognition(session_id: str, data: dict):
+    """Handle single microphone recognition - record then process."""
+    try:
+        session = recognition_sessions[session_id]
+        websocket = session["websocket"]
+
+        print(f"🎤 Starting single recognition for session: {session_id}")
+
+        # Get recognition parameters
+        is_translation = data.get("is_translation", False)
+        enable_diarization = data.get("enable_diarization", False)
+        target_language = data.get("target_language", "en")
+
+        # Setup speech configuration
+        speech_config = get_speech_config(
+            model=None,
+            is_translation=is_translation,
+            target_language=target_language,
+        )
+
+        # Create recognizer
+        recognizer = SpeechRecognizer(speech_config)
+
+        # Configure translation if needed
+        if is_translation:
+            speech_config.enable_translation = True
+            print(f"🔀 Translation mode enabled (target: {target_language})")
+
+        session["recognizer"] = recognizer
+
+        # Send acknowledgment
+        try:
+            await websocket.send_text(
+                json.dumps({
+                    "type": "single_recognition_started",
+                    "data": {
+                        "message": "Single recognition started - speak now",
+                        "enable_diarization": enable_diarization,
+                        "is_translation": is_translation
+                    }
+                })
+            )
+        except Exception as e:
+            print(f"❌ Error sending single recognition started message: {e}")
+
+        print(f"✅ Single recognition started for session: {session_id}")
+
+    except Exception as e:
+        print(f"❌ Error starting single recognition: {e}")
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "data": {"error": str(e)}})
+            )
+        except Exception as send_error:
+            print(f"❌ Error sending single recognition error message: {send_error}")
+
+
+async def handle_file_recognition(session_id: str, data: dict):
+    """Handle file-based recognition via WebSocket."""
+    try:
+        session = recognition_sessions[session_id]
+        websocket = session["websocket"]
+
+        print(f"📁 Processing file recognition for session: {session_id}")
+
+        # Get recognition parameters
+        audio_data = data.get("audio_data")
+        is_translation = data.get("is_translation", False)
+        enable_diarization = data.get("enable_diarization", False)
+        target_language = data.get("target_language", "en")
+
+        if not audio_data:
+            try:
+                await websocket.send_text(
+                    json.dumps({"type": "error", "data": {"error": "No audio data provided"}})
+                )
+            except Exception as e:
+                print(f"❌ Error sending no audio data error: {e}")
+            return
+
+        # Setup speech configuration
+        speech_config = get_speech_config(
+            model=None,
+            is_translation=is_translation,
+            target_language=target_language,
+        )
+
+        # Create recognizer
+        recognizer = SpeechRecognizer(speech_config)
+
+        # Configure translation if needed
+        if is_translation:
+            speech_config.enable_translation = True
+            print(f"🔀 Translation mode enabled (target: {target_language})")
+
+        # Decode and process audio data
+        import base64
+        import numpy as np
+        import tempfile
+        import soundfile as sf
+
+        audio_bytes = base64.b64decode(audio_data)
+        audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
+
+        # Process audio
+        if enable_diarization:
+            # For diarization, save to temp file and use process_file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_path = temp_file.name
+                sf.write(temp_path, audio_array, 16000)
+            
+            try:
+                result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+            finally:
+                import os
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+        else:
+            # For non-diarization, use direct audio data processing
+            result = recognizer.recognize_audio_data(audio_array, 16000, is_translation=is_translation)
+
+        # Send result
+        try:
+            if result:
+                if hasattr(result, "text") and result.text:
+                    await websocket.send_text(
+                        json.dumps({
+                            "type": "recognition_result",
+                            "data": {
+                                "text": result.text,
+                                "confidence": getattr(result, "confidence", None),
+                                "language": getattr(result, "language", None),
+                                "is_translation": is_translation,
+                                "enable_diarization": False
+                            }
+                        })
+                    )
+                elif hasattr(result, "segments") and result.segments:
+                    # Diarization result
+                    segments_data = []
+                    for segment in result.segments:
+                        segments_data.append({
+                            "speaker_id": segment.speaker_id,
+                            "text": getattr(segment, "text", "") or getattr(segment, "transcription", "") or "[No text]",
+                            "start_time": getattr(segment, "start_time", 0),
+                            "end_time": getattr(segment, "end_time", 0)
+                        })
+                    
+                    await websocket.send_text(
+                        json.dumps({
+                            "type": "diarization_result",
+                            "data": {
+                                "segments": segments_data,
+                                "num_speakers": result.num_speakers,
+                                "is_translation": is_translation,
+                                "enable_diarization": True
+                            }
+                        })
+                    )
+            else:
+                await websocket.send_text(
+                    json.dumps({
+                        "type": "recognition_result",
+                        "data": {
+                            "text": "",
+                            "error": "No result generated"
+                        }
+                    })
+                )
+        except Exception as e:
+            print(f"❌ Error sending file recognition result: {e}")
+
+        print(f"✅ File recognition completed for session: {session_id}")
+
+    except Exception as e:
+        print(f"❌ Error processing file recognition: {e}")
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "data": {"error": str(e)}})
+            )
+        except Exception as send_error:
+            print(f"❌ Error sending file recognition error message: {send_error}")
 
 
 async def cleanup_session(session_id: str):

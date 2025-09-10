@@ -2,7 +2,7 @@
 
 import { AudioRecorder } from '@/lib/audio-recorder';
 import { GroqAPIClient, MockGroqAPIClient } from '@/lib/groq-api';
-import { PerformanceMetrics, RecognitionMode, RecognitionResult } from '@/types';
+import { PerformanceMetrics, RecognitionMode, RecognitionResult, DiarizationResult } from '@/types';
 import {
     Download,
     FileText,
@@ -28,14 +28,18 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
     const [recognitionMode, setRecognitionMode] = useState<RecognitionMode>({
         type: 'single',
         operation: 'transcription',
+        enable_diarization: false,
     });
     const [results, setResults] = useState<RecognitionResult[]>([]);
+    const [diarizationResults, setDiarizationResults] = useState<DiarizationResult[]>([]);
     const [currentResult, setCurrentResult] = useState<RecognitionResult | null>(null);
+    const [currentDiarizationResult, setCurrentDiarizationResult] = useState<DiarizationResult | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [targetLanguage] = useState('en');
     const [selectedLanguage, setSelectedLanguage] = useState('en-US');
     const [recordingDuration, setRecordingDuration] = useState(0);
     const [showMetrics, setShowMetrics] = useState(false);
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
     const audioRecorderRef = useRef<AudioRecorder | null>(null);
     const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -460,6 +464,94 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
         URL.revokeObjectURL(url);
     }, [results]);
 
+    const handleFileUpload = useCallback(async (file: File) => {
+        if (!apiClientRef.current) return;
+
+        console.log('📁 Processing uploaded file:', file.name, file.size, 'bytes');
+        setSelectedFile(file);
+        setIsProcessing(true);
+        setError(null);
+
+        try {
+            // Convert file to base64
+            const arrayBuffer = await file.arrayBuffer();
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+
+            // Use WebSocket for file processing
+            const ws = new WebSocket('ws://localhost:8000/ws/recognize');
+            
+            ws.onopen = () => {
+                console.log('🔌 WebSocket connected for file processing');
+                
+                const fileMessage = {
+                    type: 'file_recognition',
+                    audio_data: base64,
+                    is_translation: recognitionMode.operation === 'translation',
+                    enable_diarization: recognitionMode.enable_diarization || false,
+                    target_language: targetLanguage
+                };
+                
+                ws.send(JSON.stringify(fileMessage));
+                console.log('📤 File recognition message sent');
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log('📨 WebSocket message:', data);
+
+                if (data.type === 'recognition_result') {
+                    const result: RecognitionResult = {
+                        text: data.text || '',
+                        confidence: data.confidence || 0,
+                        language: data.language || 'Unknown',
+                        timestamp: new Date().toISOString(),
+                        is_translation: data.is_translation || false,
+                        enable_diarization: data.enable_diarization || false
+                    };
+
+                    setResults(prev => [...prev, result]);
+                    setCurrentResult(result);
+                    console.log('✅ File recognition completed:', result.text);
+                } else if (data.type === 'diarization_result') {
+                    const diarizationResult: DiarizationResult = {
+                        segments: data.segments || [],
+                        num_speakers: data.num_speakers || 0,
+                        is_translation: data.is_translation || false,
+                        enable_diarization: data.enable_diarization || false,
+                        timestamp: new Date().toISOString()
+                    };
+
+                    setDiarizationResults(prev => [...prev, diarizationResult]);
+                    setCurrentDiarizationResult(diarizationResult);
+                    console.log('✅ File diarization completed:', diarizationResult.num_speakers, 'speakers');
+                } else if (data.type === 'error') {
+                    setError(data.error || 'File processing failed');
+                }
+
+                ws.close();
+            };
+
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+                setError('WebSocket connection failed');
+                ws.close();
+            };
+
+        } catch (err) {
+            console.error('❌ File processing error:', err);
+            setError(err instanceof Error ? err.message : 'File processing failed');
+        } finally {
+            setIsProcessing(false);
+        }
+    }, [recognitionMode, targetLanguage]);
+
+    const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            handleFileUpload(file);
+        }
+    }, [handleFileUpload]);
+
     const formatDuration = (ms: number) => {
         const seconds = Math.floor(ms / 1000);
         const minutes = Math.floor(seconds / 60);
@@ -536,6 +628,19 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                                 <Play className="h-4 w-4 inline mr-2" />
                                 Continuous
                             </button>
+                            <button
+                                onClick={() => {
+                                    console.log('📁 File Upload button clicked');
+                                    setRecognitionMode(prev => ({ ...prev, type: 'file' }));
+                                }}
+                                className={`px-4 py-2 rounded-lg border transition-colors ${recognitionMode.type === 'file'
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                    }`}
+                            >
+                                <FileText className="h-4 w-4 inline mr-2" />
+                                File Upload
+                            </button>
                         </div>
                         <div className="mt-2 text-sm text-gray-500">
                             Current mode: <span className="font-medium">{recognitionMode.type}</span>
@@ -571,6 +676,24 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                     </div>
                 </div>
 
+                {/* Diarization Toggle */}
+                <div className="mb-6">
+                    <label className="flex items-center space-x-2">
+                        <input
+                            type="checkbox"
+                            checked={recognitionMode.enable_diarization || false}
+                            onChange={(e) => setRecognitionMode(prev => ({ ...prev, enable_diarization: e.target.checked }))}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">
+                            Enable Speaker Diarization
+                        </span>
+                    </label>
+                    <p className="text-xs text-gray-500 mt-1">
+                        Identify and separate different speakers in the audio
+                    </p>
+                </div>
+
                 {/* Language Selection */}
                 <div className="mb-6">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -594,26 +717,52 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                     </select>
                 </div>
 
+                {/* File Upload Interface */}
+                {recognitionMode.type === 'file' && (
+                    <div className="mb-6">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Upload Audio File
+                        </label>
+                        <div className="flex items-center space-x-4">
+                            <input
+                                type="file"
+                                accept="audio/*"
+                                onChange={handleFileChange}
+                                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            />
+                            {selectedFile && (
+                                <div className="text-sm text-gray-600">
+                                    Selected: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                                </div>
+                            )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Supported formats: WAV, MP3, M4A, FLAC
+                        </p>
+                    </div>
+                )}
+
                 {/* Recording Controls */}
-                <div className="flex items-center justify-center space-x-4">
-                    {!isRecording ? (
-                        <button
-                            onClick={handleStart}
-                            disabled={isProcessing}
-                            className="flex items-center px-6 py-3 bg-red-600 text-white rounded-full hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        >
-                            <Mic className="h-5 w-5 mr-2" />
-                            Start Recording
-                        </button>
-                    ) : (
-                        <button
-                            onClick={handleStop}
-                            className="flex items-center px-6 py-3 bg-gray-600 text-white rounded-full hover:bg-gray-700 transition-colors"
-                        >
-                            <Square className="h-5 w-5 mr-2" />
-                            Stop Recording
-                        </button>
-                    )}
+                {recognitionMode.type !== 'file' && (
+                    <div className="flex items-center justify-center space-x-4">
+                        {!isRecording ? (
+                            <button
+                                onClick={handleStart}
+                                disabled={isProcessing}
+                                className="flex items-center px-6 py-3 bg-red-600 text-white rounded-full hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <Mic className="h-5 w-5 mr-2" />
+                                Start Recording
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleStop}
+                                className="flex items-center px-6 py-3 bg-gray-600 text-white rounded-full hover:bg-gray-700 transition-colors"
+                            >
+                                <Square className="h-5 w-5 mr-2" />
+                                Stop Recording
+                            </button>
+                        )}
 
                     {recordingDuration > 0 && (
                         <div className="text-lg font-mono text-gray-700">
@@ -639,6 +788,7 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                         </button>
                     )}
                 </div>
+                )}
 
                 {/* Error Display */}
                 {error && (
@@ -705,6 +855,50 @@ export const SpeechRecognitionComponent: React.FC<SpeechRecognitionProps> = ({
                     performanceMetrics={performanceMetrics}
                     recentResults={results}
                 />
+            )}
+
+            {/* Diarization Results */}
+            {currentDiarizationResult && (
+                <div className="bg-white rounded-lg shadow-md border p-6">
+                    <h2 className="text-xl font-semibold mb-4">Speaker Diarization Results</h2>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Number of Speakers
+                                </label>
+                                <p className="text-lg font-semibold">{currentDiarizationResult.num_speakers}</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Segments
+                                </label>
+                                <p className="text-lg font-semibold">{currentDiarizationResult.segments.length}</p>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Speaker Segments
+                            </label>
+                            <div className="space-y-3">
+                                {currentDiarizationResult.segments.map((segment, index) => (
+                                    <div key={index} className="p-4 bg-gray-50 rounded-lg border">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="font-semibold text-blue-600">
+                                                {segment.speaker_id}
+                                            </span>
+                                            <span className="text-sm text-gray-500">
+                                                {segment.start_time.toFixed(1)}s - {segment.end_time.toFixed(1)}s
+                                            </span>
+                                        </div>
+                                        <p className="text-gray-800">{segment.text}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* Results History */}

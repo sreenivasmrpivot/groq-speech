@@ -3,12 +3,14 @@
 import { ClientOnly } from '@/components/ClientOnly';
 import { DebugPanel } from '@/components/DebugPanel';
 import { SpeechRecognitionComponent } from '@/components/SpeechRecognition';
+import { EnhancedSpeechDemo } from '@/components/EnhancedSpeechDemo';
 import { GroqAPIClient } from '@/lib/groq-api';
 import { AlertCircle, CheckCircle, Info, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 export default function Home() {
     const [useMockApi, setUseMockApi] = useState(false);
+    const [useEnhancedDemo, setUseEnhancedDemo] = useState(true);
     const [isConfigured, setIsConfigured] = useState(false);
     const [showBackendConfig, setShowBackendConfig] = useState(false);
     const [backendStatus, setBackendStatus] = useState<'checking' | 'configured' | 'not-configured' | 'error'>('checking');
@@ -143,6 +145,17 @@ export default function Home() {
                                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                 />
                                 <span className="text-sm text-gray-700">Use Mock API</span>
+                            </label>
+
+                            {/* Enhanced Demo Toggle */}
+                            <label className="flex items-center space-x-2">
+                                <input
+                                    type="checkbox"
+                                    checked={useEnhancedDemo}
+                                    onChange={(e) => setUseEnhancedDemo(e.target.checked)}
+                                    className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                                />
+                                <span className="text-sm text-gray-700">Enhanced Demo</span>
                             </label>
 
                             {/* Backend Config Button */}
@@ -295,9 +308,11 @@ export default function Home() {
                             </div>
                         </div>
                     }>
-                        <SpeechRecognitionComponent
-                            useMockApi={useMockApi}
-                        />
+                        {useEnhancedDemo ? (
+                            <EnhancedSpeechDemo useMockApi={useMockApi} />
+                        ) : (
+                            <SpeechRecognitionComponent useMockApi={useMockApi} />
+                        )}
                     </ClientOnly>
                 </main>
             )}

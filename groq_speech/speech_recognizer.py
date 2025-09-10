@@ -551,26 +551,15 @@ class SpeechRecognizer:
         self.response_parser = ResponseParser(speech_config)
         self._diarization_service = diarization_service  # Lazy-loaded only when needed
         self.event_manager = EventManager()
-    
-    @property
-    def diarization_service(self) -> IDiarizationService:
-        """Get diarization service with lazy loading."""
-        if self._diarization_service is None:
-            self._diarization_service = DiarizationService(self)
-        return self._diarization_service
-        
         
         # Continuous recognition state (used by API)
         self._is_recognizing = False
         self._recognition_thread = None
         self._stop_recognition = False
-        
-        # Validate configuration
-        self.speech_config.validate()
     
     @property
-    def diarization_service(self):
-        """Lazy-load diarization service only when needed."""
+    def diarization_service(self) -> IDiarizationService:
+        """Get diarization service with lazy loading."""
         if self._diarization_service is None:
             self._diarization_service = DiarizationService(self)
         return self._diarization_service
