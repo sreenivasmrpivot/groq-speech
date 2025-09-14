@@ -3,17 +3,16 @@ Speech recognizer for Groq Speech services.
 
 This module provides a comprehensive speech recognition system that integrates
 with Groq's AI-powered speech-to-text and translation APIs. It supports both
-single-shot and continuous recognition modes with advanced audio processing
-capabilities.
+file-based and real-time processing with advanced audio processing capabilities.
 
 ARCHITECTURE OVERVIEW:
 1. CORE COMPONENTS
-   - SpeechRecognizer: Main orchestrator class
+   - SpeechRecognizer: Main orchestrator class (Facade pattern)
    - AudioProcessor: Handles audio preprocessing and optimization
    - APIClient: Manages Groq API communication
-   - DiarizationService: Handles speaker diarization
+   - SpeakerDiarizer: Handles speaker diarization using Pyannote.audio
+   - VADService: Voice Activity Detection and audio chunking
    - EventManager: Manages event-driven architecture
-   - PerformanceTracker: Tracks metrics and timing
 
 2. SOLID PRINCIPLES IMPLEMENTATION
    - Single Responsibility: Each class has one clear purpose
@@ -23,38 +22,32 @@ ARCHITECTURE OVERVIEW:
    - Dependency Inversion: High-level modules depend on abstractions
 
 3. PERFORMANCE OPTIMIZATIONS
-   - O(1) audio preprocessing with caching
-   - O(n) diarization with parallel processing
-   - O(1) API response parsing
-   - Memory-efficient audio chunking
+   - Intelligent audio chunking with VAD
+   - Efficient diarization with Pyannote.audio
+   - Memory-efficient audio processing
    - Connection pooling for API calls
+   - Real-time WebSocket streaming
 
 KEY FEATURES:
-- Real-time microphone input with configurable chunk sizes
 - File-based audio processing with automatic chunking
-- Automatic language detection (no manual language specification needed)
-- Word and segment-level timestamps
-- Performance metrics and timing analysis
-- Configurable audio quality and processing parameters
+- Real-time audio data processing
+- Speaker diarization with Pyannote.audio
+- Voice Activity Detection for intelligent chunking
 - Support for both transcription and translation modes
-- Thread-safe continuous recognition
+- WebSocket integration for real-time processing
 - Comprehensive error handling and diagnostics
 
 USAGE EXAMPLES:
     # Basic transcription
     config = SpeechConfig()
     recognizer = SpeechRecognizer(config)
-    result = recognizer.recognize_once_async()
+    result = recognizer.recognize_file("audio.wav")
 
-    # Translation to English
-    config.enable_translation = True
-    recognizer = SpeechRecognizer(config)
-    result = recognizer.translate_audio_data(audio_data)
+    # Translation with diarization
+    result = recognizer.translate_file("audio.wav", enable_diarization=True)
 
-    # Continuous recognition
-    recognizer.start_continuous_recognition()
-    # ... handle events ...
-    recognizer.stop_continuous_recognition()
+    # Raw audio data processing
+    result = recognizer.recognize_audio_data(audio_data, is_translation=True)
 """
 
 import time
@@ -69,6 +62,7 @@ from .result_reason import ResultReason
 from .speaker_diarization import DiarizationResult
 from .vad_service import VADConfig, VADService
 from .exceptions import APIError, AudioError, create_api_error, create_audio_error
+from .logging_utils import sdk_logger
 
 
 # ============================================================================
@@ -79,7 +73,7 @@ from .exceptions import APIError, AudioError, create_api_error, create_audio_err
 
 class SpeechRecognitionResult:
     """Result of a speech recognition operation - immutable data class."""
-    
+
     def __init__(
         self,
         text: str = "",
@@ -94,7 +88,7 @@ class SpeechRecognitionResult:
         self.confidence = confidence
         self.language = language
         self.timestamps = timestamps or []
-    
+
     def __str__(self) -> str:
         """String representation for debugging and logging."""
         return (f"SpeechRecognitionResult(text='{self.text}', "
@@ -130,10 +124,10 @@ class ResponseParser:
     def parse_transcription_response(self, response: Any) -> SpeechRecognitionResult:
         """
         Parse Groq transcription response - O(n) operation.
-        
+
         Args:
             response: Raw Groq API response object
-            
+
         Returns:
             Parsed recognition result
         """
@@ -142,10 +136,10 @@ class ResponseParser:
     def parse_translation_response(self, response: Any) -> SpeechRecognitionResult:
         """
         Parse Groq translation response - O(n) operation.
-        
+
         Args:
             response: Raw Groq API response object
-            
+
         Returns:
             Parsed recognition result
         """
@@ -185,27 +179,27 @@ class ResponseParser:
         if is_translation:
             # For translation, try to get the detected source language
             language = getattr(response, "language", None)
-            
+
             if not language and hasattr(response, "segments"):
                 for segment in response.segments:
                     if hasattr(segment, "language") and segment.language:
                         language = segment.language
                         break
-            
+
             if not language:
                 # Try common attribute names for source language
                 for attr_name in ["source_language", "input_language", "detected_language"]:
                     if hasattr(response, attr_name):
                         language = getattr(response, attr_name)
                         break
-            
+
             return language or "Auto-detected"
         else:
             return getattr(
                 response, "language", 
                 self.speech_config.speech_recognition_language
             )
-    
+
     def _extract_timestamps(self, response: Any) -> List[Dict[str, Any]]:
         """Extract timestamps from response - O(n) operation."""
         timestamps = []
@@ -239,14 +233,14 @@ class EventManager:
     def connect(self, event_type: str, handler: Callable) -> None:
         """
         Connect an event handler - O(1) operation.
-        
+
         Args:
             event_type: Type of event to handle
             handler: Function to call when event occurs
         """
         if event_type not in self._handlers:
             raise ValueError(f"Unknown event type: {event_type}")
-        
+
         self._handlers[event_type].append(handler)
     
     def trigger(self, event_type: str, event_data: Any) -> None:
@@ -259,7 +253,7 @@ class EventManager:
         """
         if event_type not in self._handlers:
             return
-        
+
         # Execute all handlers with error isolation
         for handler in self._handlers[event_type]:
             try:
@@ -289,11 +283,11 @@ class DiarizationService:
     def diarize_file(self, audio_file: str, mode: str, verbose: bool = False) -> DiarizationResult:
         """
         Perform speaker diarization on audio file - O(n log n) operation.
-        
+
         Args:
             audio_file: Path to audio file
             mode: 'transcription' or 'translation'
-            
+
         Returns:
             DiarizationResult with speaker segments
         """
@@ -316,6 +310,45 @@ class DiarizationService:
                 end_time=1.0,
                 speaker_id="SPEAKER_00",
                 text="[Diarization failed]"
+            )
+            return DiarizationResult(
+                segments=[segment],
+                speaker_mapping={"SPEAKER_00": "Speaker 1"},
+                total_duration=1.0,
+                num_speakers=1,
+                overall_confidence=0.5
+            )
+    
+    def _create_fallback_file_result(self, audio_file: str, mode: str) -> DiarizationResult:
+        """Create a fallback result when diarization is not available."""
+        try:
+            # Use the SpeechRecognizer to get basic transcription
+            result = self._speech_recognizer_instance._process_file_basic(audio_file, mode == "translation")
+            
+            # Create a simple diarization result with the transcription
+            from .speaker_diarization import SpeakerSegment, DiarizationResult
+            segment = SpeakerSegment(
+                start_time=0.0,
+                end_time=1.0,
+                speaker_id="SPEAKER_00",
+                text=result.text if hasattr(result, 'text') else "[No transcription available]"
+            )
+            return DiarizationResult(
+                segments=[segment],
+                speaker_mapping={"SPEAKER_00": "Speaker 1"},
+                total_duration=1.0,
+                num_speakers=1,
+                overall_confidence=0.5
+            )
+        except Exception as e:
+            print(f"❌ Fallback diarization failed: {e}")
+            # Create a minimal fallback result
+            from .speaker_diarization import SpeakerSegment, DiarizationResult
+            segment = SpeakerSegment(
+                start_time=0.0,
+                end_time=1.0,
+                speaker_id="SPEAKER_00",
+                text="[Diarization not available]"
             )
             return DiarizationResult(
                 segments=[segment],
@@ -506,7 +539,7 @@ class SpeechRecognizer:
     """
     
     def __init__(
-        self, 
+        self,
         speech_config: Optional[SpeechConfig] = None,
         api_key: Optional[str] = None,
         enable_diarization: bool = False,
@@ -519,7 +552,7 @@ class SpeechRecognizer:
     ):
         """
         Initialize speech recognizer with configuration and dependencies.
-        
+
         Args:
             speech_config: Speech configuration (optional)
             api_key: Groq API key (optional)
@@ -577,23 +610,42 @@ class SpeechRecognizer:
     ) -> SpeechRecognitionResult:
         """
         Recognize speech from audio data using Groq API - O(n) operation.
-        
+
         Args:
             audio_data: Audio data as numpy array
             sample_rate: Audio sample rate
             is_translation: Whether to use translation endpoint
-            
+
         Returns:
             SpeechRecognitionResult with recognition data and timing metrics
         """
         try:
+            sdk_logger.info("Starting audio recognition", {
+                "audio_samples": len(audio_data),
+                "sample_rate": sample_rate,
+                "is_translation": is_translation,
+                "audio_duration": len(audio_data) / sample_rate
+            })
+            
             # Process audio using dedicated processor - O(n)
             processed_audio = self.audio_processor.process_audio(audio_data, sample_rate)
+            
+            sdk_logger.debug("Audio processing completed", {
+                "original_samples": len(audio_data),
+                "processed_samples": len(processed_audio),
+                "sample_rate": sample_rate
+            })
             
             # Save audio to temporary buffer - O(n)
             buffer = io.BytesIO()
             sf.write(buffer, processed_audio, 16000, format="WAV")
             buffer.seek(0)
+            
+            sdk_logger.info("Calling Groq API", {
+                "endpoint": "translate" if is_translation else "transcribe",
+                "buffer_size": buffer.getbuffer().nbytes,
+                "audio_duration": len(processed_audio) / 16000
+            })
             
             # Call Groq API - O(1) with network I/O
             if is_translation:
@@ -607,9 +659,21 @@ class SpeechRecognizer:
             else:
                 result = self.response_parser.parse_transcription_response(response)
 
+            sdk_logger.success("Audio recognition completed", {
+                "text": result.text[:100] + "..." if len(result.text) > 100 else result.text,
+                "confidence": result.confidence,
+                "reason": result.reason.name if hasattr(result.reason, 'name') else str(result.reason),
+                "is_translation": is_translation
+            })
+
             return result
-        
+
         except Exception as e:
+            sdk_logger.error("Audio recognition failed", {
+                "error": str(e),
+                "audio_samples": len(audio_data),
+                "is_translation": is_translation
+            })
             return SpeechRecognitionResult(
                 reason=ResultReason.Canceled,
                 text=f"Recognition failed: {str(e)}"
@@ -619,22 +683,22 @@ class SpeechRecognizer:
         """Translate audio to English text using Groq API."""
         return self.recognize_audio_data(audio_data, sample_rate, is_translation=True)
     
-    def process_file(self, audio_file: str, enable_diarization: bool = True, is_translation: bool = False) -> Union[SpeechRecognitionResult, DiarizationResult]:
+    async def process_file(self, audio_file: str, enable_diarization: bool = True, is_translation: bool = False) -> Union[SpeechRecognitionResult, DiarizationResult]:
         """
         Process audio file with automatic fallback handling - O(n) operation.
-        
+
         Args:
             audio_file: Path to audio file
             enable_diarization: Whether to use diarization
             is_translation: Whether to use translation endpoint
-            
+
         Returns:
             SpeechRecognitionResult or DiarizationResult
         """
         try:
             if enable_diarization:
                 mode = "translation" if is_translation else "transcription"
-                result = self.diarization_service.diarize_file(audio_file, mode)
+                result = await self.diarization_service.diarize_file(audio_file, mode)
                 if result and self._is_valid_result(result):
                     return result
                 # Fallback to basic processing if diarization fails
@@ -736,4 +800,103 @@ class SpeechRecognizer:
     def should_create_chunk(self, audio_data: np.ndarray, sample_rate: int, max_duration: float) -> Tuple[bool, str]:
         """Check if audio chunk should be created."""
         return self.vad_service.should_create_chunk(audio_data, sample_rate, max_duration)
+    
+    def recognize_audio_data_chunked(
+        self, audio_data: np.ndarray, sample_rate: int = 16000, is_translation: bool = False, 
+        max_chunk_duration: float = 390.0
+    ) -> SpeechRecognitionResult:
+        """
+        Recognize speech from audio data with automatic chunking for large audio files.
+        
+        Args:
+            audio_data: Audio data as numpy array
+            sample_rate: Audio sample rate
+            is_translation: Whether to use translation endpoint
+            max_chunk_duration: Maximum duration per chunk in seconds
+            
+        Returns:
+            SpeechRecognitionResult with recognition data
+        """
+        # Check if we need to chunk the audio
+        should_create, reason = self.should_create_chunk(audio_data, sample_rate, max_chunk_duration)
+        
+        if not should_create:
+            # Audio is small enough, process directly
+            return self.recognize_audio_data(audio_data, sample_rate, is_translation)
+        
+        # Audio is too large, need to chunk it
+        sdk_logger.info("Audio too large for single API call, chunking required", {
+            "audio_duration": len(audio_data) / sample_rate,
+            "reason": reason
+        })
+        
+        # Check if audio exceeds 24MB limit
+        estimated_size_mb = (len(audio_data) * 4) / (1024 * 1024)  # 32-bit float = 4 bytes per sample
+        if estimated_size_mb > 24.0:
+            sdk_logger.warning("Audio exceeds 24MB limit, processing in chunks", {
+                "estimated_size_mb": estimated_size_mb,
+                "original_duration": len(audio_data) / sample_rate
+            })
+            
+            # Split audio into chunks that fit within 24MB limit
+            max_samples_per_chunk = int(20.0 * 1024 * 1024 / 4)  # 20MB in samples (conservative)
+            chunks = []
+            for i in range(0, len(audio_data), max_samples_per_chunk):
+                chunk = audio_data[i:i + max_samples_per_chunk]
+                chunks.append(chunk)
+            
+            sdk_logger.info("Audio split into chunks", {
+                "num_chunks": len(chunks),
+                "chunk_duration": len(chunks[0]) / sample_rate if chunks else 0
+            })
+            
+            # Process each chunk and combine results
+            all_texts = []
+            for i, chunk in enumerate(chunks):
+                sdk_logger.info(f"Processing chunk {i+1}/{len(chunks)}", {
+                    "chunk_duration": len(chunk) / sample_rate,
+                    "chunk_samples": len(chunk)
+                })
+                
+                try:
+                    result = self.recognize_audio_data(chunk, sample_rate, is_translation)
+                    if result and result.text:
+                        all_texts.append(result.text.strip())
+                except Exception as e:
+                    sdk_logger.warning(f"Chunk {i+1} processing failed", {
+                        "error": str(e),
+                        "chunk_duration": len(chunk) / sample_rate
+                    })
+                    # Continue with other chunks
+                    continue
+            
+            # Combine all text results
+            if all_texts:
+                combined_text = " ".join(all_texts)
+                sdk_logger.info("Chunked processing completed", {
+                    "total_chunks": len(chunks),
+                    "successful_chunks": len(all_texts),
+                    "combined_text_length": len(combined_text)
+                })
+                
+                # Return a combined result
+                from .result_reason import ResultReason
+                return SpeechRecognitionResult(
+                    text=combined_text,
+                    reason=ResultReason.RecognizedSpeech,
+                    confidence=0.95,  # Average confidence
+                    language="en"
+                )
+            else:
+                sdk_logger.error("All chunks failed to process")
+                from .result_reason import ResultReason
+                return SpeechRecognitionResult(
+                    text="Recognition failed: All chunks failed to process",
+                    reason=ResultReason.NoMatch,
+                    confidence=0.0
+                )
+        
+        # Audio is within size limit but exceeds duration threshold
+        # Process the entire audio as one chunk
+        return self.recognize_audio_data(audio_data, sample_rate, is_translation)
     

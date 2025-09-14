@@ -1,30 +1,39 @@
-# Groq Speech SDK - Complete Documentation
+# Groq Speech SDK - Core Module
 
-This is the core module of the Groq Speech SDK, providing speech recognition, translation, and speaker diarization capabilities with a simplified single-entry-point architecture.
+This is the core module of the Groq Speech SDK, providing speech recognition, translation, and speaker diarization capabilities with a clean, SOLID-principle-based architecture.
 
-## Demo Usage
+## Quick Start
 
-The SDK includes a clean, simple demo script that showcases all capabilities:
+```python
+from groq_speech import SpeechRecognizer, SpeechConfig
 
-```bash
-# File-based transcription (SDK handles all complexity internally)
-python examples/speech_demo.py --file audio.wav
+# Basic usage
+config = SpeechConfig()
+recognizer = SpeechRecognizer(config)
 
-# File-based translation with diarization
-python examples/speech_demo.py --file audio.wav --operation translation --diarize
+# File processing (async)
+result = await recognizer.recognize_file("audio.wav")
+print(f"Recognized: {result.text}")
 
-# Microphone single mode
-python examples/speech_demo.py --microphone-mode single
+# With diarization (async)
+result = await recognizer.recognize_file("audio.wav", enable_diarization=True)
+if hasattr(result, 'segments'):
+    for segment in result.segments:
+        print(f"Speaker {segment.speaker_id}: {segment.text}")
 
-# Microphone continuous mode
-python examples/speech_demo.py --microphone-mode continuous --diarize
+# Translation (async)
+result = await recognizer.translate_file("audio.wav")
+print(f"Translated: {result.text}")
 ```
 
-**Key Benefits:**
-- **54% fewer lines of code** compared to complex implementations
-- **No fallback logic** - SDK handles everything internally
-- **No manual audio preprocessing** - AudioProcessor handles it automatically
-- **Simple API calls** - Just call `recognizer.recognize_file()` or `recognizer.translate_file()`
+## Key Features
+
+- **Real-time Processing**: Support for both file and streaming audio
+- **Speaker Diarization**: Multi-speaker detection using Pyannote.audio
+- **Voice Activity Detection**: Intelligent audio chunking and silence detection
+- **Translation Support**: Automatic translation to target languages
+- **Web Interface**: Modern React-based UI for testing and demonstration
+- **REST API**: FastAPI backend with WebSocket support
 
 ## Table of Contents
 1. [Quick Start](#quick-start)
@@ -56,7 +65,7 @@ result = recognizer.translate_file("audio.wav")
 result = recognizer.recognize_file("audio.wav", enable_diarization=True)
 ```
 
-## Critical Entry Points
+## Core Classes
 
 ### 1. SpeechRecognizer (Primary Entry Point)
 **Location**: `groq_speech.speech_recognizer.SpeechRecognizer`
@@ -73,35 +82,36 @@ recognizer = SpeechRecognizer(config)
 result = recognizer.recognize_file("audio.wav", enable_diarization=True)
 result = recognizer.translate_file("audio.wav", enable_diarization=False)
 
-# Microphone processing
-result = recognizer.recognize_microphone(duration=10)
-result = recognizer.translate_microphone(duration=10)
+# Raw audio data processing
+result = recognizer.recognize_audio_data(audio_data, sample_rate=16000)
+result = recognizer.recognize_audio_data(audio_data, is_translation=True)
 
-# Raw audio data
-result = recognizer.recognize_audio_data(audio_data)
-result = recognizer.translate_audio_data(audio_data)
+# Process file with diarization
+result = recognizer.process_file("audio.wav", enable_diarization=True, is_translation=False)
 ```
 
 **Key Public Methods**:
 - `recognize_file(audio_file, enable_diarization=True)` - Process audio files
 - `translate_file(audio_file, enable_diarization=True)` - Translate audio files
-- `recognize_audio_data(audio_data)` - Process raw audio data
-- `translate_audio_data(audio_data)` - Translate raw audio data
-- `recognize_microphone(duration=None)` - Microphone recognition
-- `translate_microphone(duration=None)` - Microphone translation
+- `recognize_audio_data(audio_data, sample_rate=16000, is_translation=False)` - Process raw audio data
+- `process_file(audio_file, enable_diarization=True, is_translation=False)` - Process files with full control
 
-### 2. Config (Configuration Management)
-**Location**: `groq_speech.config.Config`
+### 2. SpeechConfig (Configuration Management)
+**Location**: `groq_speech.speech_config.SpeechConfig`
 
-Centralized configuration management:
+Configuration management for speech recognition:
 
 ```python
-from groq_speech import Config
+from groq_speech import SpeechConfig
 
-# Get configuration
-api_key = Config.get_api_key()
-model_config = Config.get_model_config()
-chunking_config = Config.get_chunking_config()
+# Create configuration
+config = SpeechConfig()
+config.api_key = "your-api-key"
+config.enable_translation = True
+config.set_translation_target_language("en")
+
+# Use with recognizer
+recognizer = SpeechRecognizer(config)
 ```
 
 ### 3. Result Objects (Data Access)
@@ -110,39 +120,57 @@ chunking_config = Config.get_chunking_config()
 Structured result data access:
 
 ```python
+# Basic recognition result
 result = recognizer.recognize_file("audio.wav")
 print(f"Text: {result.text}")
 print(f"Confidence: {result.confidence}")
-print(f"Timestamps: {result.timestamps}")
+print(f"Language: {result.language}")
+
+# Diarization result
+result = recognizer.recognize_file("audio.wav", enable_diarization=True)
+if hasattr(result, 'segments'):
+    print(f"Number of speakers: {result.num_speakers}")
+    for segment in result.segments:
+        print(f"Speaker {segment.speaker_id}: {segment.text}")
+```
+
+### 4. Speaker Diarization
+**Location**: `groq_speech.speaker_diarization.SpeakerDiarizer`
+
+Advanced speaker diarization using Pyannote.audio:
+
+```python
+from groq_speech import SpeakerDiarizer
+
+diarizer = SpeakerDiarizer()
+result = diarizer.diarize_with_accurate_transcription(
+    audio_file="audio.wav",
+    mode="transcription",
+    speech_recognizer=recognizer
+)
 ```
 
 ## Architecture Overview
 
-The SDK follows a **simplified single-entry-point architecture** with SOLID principles:
+The SDK follows a **clean architecture with SOLID principles**:
 
-### Primary Entry Point
-- **SpeechRecognizer**: Main orchestrator for all speech operations
+### Core Components
+- **SpeechRecognizer**: Main orchestrator class (Facade pattern)
+- **SpeakerDiarizer**: Speaker diarization using Pyannote.audio
+- **VADService**: Voice Activity Detection and audio chunking
+- **SpeechConfig**: Configuration management
 
-### Service Classes (Internal)
-- **DiarizationService**: Handles speaker diarization with smart grouping
-- **AudioProcessor**: Manages audio processing and chunking
-- **VADService**: Voice Activity Detection with multiple fallback options
-- **GroqAPIClient**: Handles API communication
-- **ResponseParser**: Parses API responses
-- **EventManager**: Manages real-time events
-- **PerformanceTracker**: Monitors performance metrics
+### Internal Services (Dependency Injection)
+- **APIClient**: Groq API communication
+- **AudioProcessor**: Audio preprocessing and optimization
+- **ResponseParser**: API response parsing
+- **EventManager**: Event-driven architecture
 
-### Configuration
-- **SpeechConfig**: Speech recognition settings
-- **Config**: Centralized configuration management
-- **DiarizationConfig**: Diarization parameters
-
-### SOLID Principles Implementation
+### Design Patterns
+- **Facade Pattern**: SpeechRecognizer provides simple interface
+- **Dependency Injection**: Services injected for testability
 - **Single Responsibility**: Each class has one clear purpose
-- **Open/Closed**: Easy to extend without modifying existing code
-- **Liskov Substitution**: Interfaces can be substituted
 - **Interface Segregation**: Small, focused interfaces
-- **Dependency Inversion**: High-level modules depend on abstractions
 
 ## Data Flows
 

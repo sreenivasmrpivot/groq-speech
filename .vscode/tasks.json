@@ -389,6 +389,121 @@
                 "clear": false
             },
             "problemMatcher": []
+        },
+        {
+            "label": "Install Frontend Dependencies",
+            "type": "shell",
+            "command": "npm",
+            "args": ["install"],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/groq-speech-ui"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Start Frontend Development Server",
+            "type": "shell",
+            "command": "npm",
+            "args": ["run", "dev"],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/groq-speech-ui"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [],
+            "isBackground": true
+        },
+        {
+            "label": "Build Frontend",
+            "type": "shell",
+            "command": "npm",
+            "args": ["run", "build"],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/groq-speech-ui"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Lint Frontend",
+            "type": "shell",
+            "command": "npm",
+            "args": ["run", "lint"],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/groq-speech-ui"
+            },
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Start API Server",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "api.server"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [],
+            "isBackground": true
+        },
+        {
+            "label": "Start Full Stack Development",
+            "dependsOrder": "parallel",
+            "dependsOn": [
+                "Start API Server",
+                "Start Frontend Development Server"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
         }
     ]
 }

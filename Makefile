@@ -69,23 +69,38 @@ install-editable: ## Install package in editable mode
 # Testing
 test: ## Run all tests
 	@echo "Running all tests..."
-	$(PYTEST) $(TESTS_DIR) -v
+	$(PYTHON) run_tests.py --verbose
 	@echo "✅ All tests completed"
 
 test-unit: ## Run unit tests only
 	@echo "Running unit tests..."
-	$(PYTEST) $(TESTS_DIR)/unit/ -v
+	$(PYTHON) run_tests.py --unit --verbose
 	@echo "✅ Unit tests completed"
 
 test-integration: ## Run integration tests only
 	@echo "Running integration tests..."
-	$(PYTEST) $(TESTS_DIR)/integration/ -v
+	$(PYTHON) run_tests.py --e2e --verbose
 	@echo "✅ Integration tests completed"
 
 test-e2e: ## Run end-to-end tests only
 	@echo "Running end-to-end tests..."
-	$(PYTEST) $(TESTS_DIR)/e2e/ -v
+	$(PYTHON) run_tests.py --e2e --verbose
 	@echo "✅ End-to-end tests completed"
+
+test-cli: ## Run CLI tests only
+	@echo "Running CLI tests..."
+	$(PYTHON) run_tests.py --cli --verbose
+	@echo "✅ CLI tests completed"
+
+test-api: ## Run API tests only
+	@echo "Running API tests..."
+	$(PYTHON) -m pytest tests/test_e2e_api.py -v --tb=short
+	@echo "✅ API tests completed"
+
+test-quick: ## Run quick tests (unit tests only)
+	@echo "Running quick tests..."
+	$(PYTHON) run_tests.py --unit
+	@echo "✅ Quick tests completed"
 
 test-performance: ## Run performance tests
 	@echo "Running performance tests..."

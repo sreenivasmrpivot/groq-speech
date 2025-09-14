@@ -2,15 +2,14 @@
 
 import { ClientOnly } from '@/components/ClientOnly';
 import { DebugPanel } from '@/components/DebugPanel';
-import { SpeechRecognitionComponent } from '@/components/SpeechRecognition';
 import { EnhancedSpeechDemo } from '@/components/EnhancedSpeechDemo';
 import { GroqAPIClient } from '@/lib/groq-api';
+import { uiLogger } from '@/lib/frontend-logger';
 import { AlertCircle, CheckCircle, Info, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 export default function Home() {
     const [useMockApi, setUseMockApi] = useState(false);
-    const [useEnhancedDemo, setUseEnhancedDemo] = useState(true);
     const [isConfigured, setIsConfigured] = useState(false);
     const [showBackendConfig, setShowBackendConfig] = useState(false);
     const [backendStatus, setBackendStatus] = useState<'checking' | 'configured' | 'not-configured' | 'error'>('checking');
@@ -20,7 +19,64 @@ export default function Home() {
 
     useEffect(() => {
         setIsClient(true);
+        
+        // Test frontend logger explicitly
+        console.log('About to test frontend logger...');
+        uiLogger.info('Home page loaded - testing frontend logger', {
+            timestamp: new Date().toISOString(),
+            location: 'page.tsx',
+            test: 'frontend-logger-test'
+        });
+        
+        // Also test direct fetch to backend for debugging
+        console.log('Testing direct fetch to backend logging endpoint...');
+        fetch('http://localhost:8000/api/log', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                component: 'DIRECT_TEST',
+                level: 'INFO',
+                message: 'Direct fetch test from page.tsx',
+                context: { test: 'direct-fetch', timestamp: new Date().toISOString() },
+                timestamp: new Date().toISOString()
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Direct fetch response:', data);
+        })
+        .catch(error => {
+            console.error('Direct fetch error:', error);
+        });
+        
         checkBackendConfiguration();
+        
+        // Check logging status after a delay
+        setTimeout(() => {
+            const logHistory = JSON.parse(localStorage.getItem('frontend-log-history') || '[]');
+            const successHistory = JSON.parse(localStorage.getItem('frontend-log-success') || '[]');
+            const failureHistory = JSON.parse(localStorage.getItem('frontend-log-failures') || '[]');
+            
+            console.log('=== FRONTEND LOGGING STATUS ===');
+            console.log('Log history entries:', logHistory.length);
+            console.log('Successful backend sends:', successHistory.length);
+            console.log('Failed backend sends:', failureHistory.length);
+            
+            if (logHistory.length > 0) {
+                console.log('Latest log entry:', logHistory[logHistory.length - 1]);
+            }
+            
+            if (successHistory.length > 0) {
+                console.log('Latest success:', successHistory[successHistory.length - 1]);
+            }
+            
+            if (failureHistory.length > 0) {
+                console.log('Latest failure:', failureHistory[failureHistory.length - 1]);
+            }
+            console.log('=== END LOGGING STATUS ===');
+        }, 3000);
     }, []);
 
     const checkBackendConfiguration = async () => {
@@ -147,16 +203,6 @@ export default function Home() {
                                 <span className="text-sm text-gray-700">Use Mock API</span>
                             </label>
 
-                            {/* Enhanced Demo Toggle */}
-                            <label className="flex items-center space-x-2">
-                                <input
-                                    type="checkbox"
-                                    checked={useEnhancedDemo}
-                                    onChange={(e) => setUseEnhancedDemo(e.target.checked)}
-                                    className="rounded border-gray-300 text-green-600 focus:ring-green-500"
-                                />
-                                <span className="text-sm text-gray-700">Enhanced Demo</span>
-                            </label>
 
                             {/* Backend Config Button */}
                             <button
@@ -308,11 +354,7 @@ export default function Home() {
                             </div>
                         </div>
                     }>
-                        {useEnhancedDemo ? (
-                            <EnhancedSpeechDemo useMockApi={useMockApi} />
-                        ) : (
-                            <SpeechRecognitionComponent useMockApi={useMockApi} />
-                        )}
+                        <EnhancedSpeechDemo />
                     </ClientOnly>
                 </main>
             )}

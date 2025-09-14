@@ -21,6 +21,8 @@ export interface RecognitionResult {
     timestamp: string;
     is_translation?: boolean;
     enable_diarization?: boolean;
+    duration?: number;
+    hasError?: boolean;
     // Optional diarization properties
     segments?: DiarizationSegment[];
     num_speakers?: number;

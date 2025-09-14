@@ -3,6 +3,11 @@
 import { AudioRecorder } from '@/lib/audio-recorder';
 import { GroqAPIClient } from '@/lib/groq-api';
 import { PerformanceMetrics, RecognitionResult, DiarizationResult } from '@/types';
+import { uiLogger, audioLogger, apiLogger } from '@/lib/frontend-logger';
+import { audioConverter } from '@/lib/audio-converter';
+import { OptimizedAudioRecorder } from '@/lib/optimized-audio-recorder';
+import { OptimizedAudioConverter } from '@/lib/optimized-audio-converter';
+import { ContinuousAudioRecorder } from '@/lib/continuous-audio-recorder';
 import {
     Download,
     FileText,
@@ -17,7 +22,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PerformanceMetricsComponent } from './PerformanceMetrics';
 
 interface EnhancedSpeechDemoProps {
-    useMockApi?: boolean;
+    // All functionality is self-contained - no props needed
+    [key: string]: never;
 }
 
 type CommandType = 
@@ -193,7 +199,10 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
     const [error, setError] = useState<string | null>(null);
     const [recordingDuration, setRecordingDuration] = useState(0);
     const [showMetrics, setShowMetrics] = useState(false);
+    const [useOptimizedRecorder, setUseOptimizedRecorder] = useState(true); // Use optimized recorder by default
     const [isDiarizationProcessing, setIsDiarizationProcessing] = useState(false);
+    const [audioLevel, setAudioLevel] = useState(0);
+    const [recordingStatus, setRecordingStatus] = useState('');
     const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics>({
         total_requests: 0,
         successful_recognitions: 0,
@@ -207,9 +216,12 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
     });
 
     const audioRecorderRef = useRef<AudioRecorder | null>(null);
+    const optimizedAudioRecorderRef = useRef<OptimizedAudioRecorder | null>(null);
+    const optimizedAudioConverterRef = useRef<OptimizedAudioConverter | null>(null);
+    const continuousAudioRecorderRef = useRef<ContinuousAudioRecorder | null>(null);
     const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const apiClientRef = useRef<GroqAPIClient | null>(null);
-    const websocketRef = useRef<WebSocket | null>(null);
+    const recordingStartTimeRef = useRef<number | null>(null);
 
     const currentConfig = COMMAND_CONFIGS.find(cmd => cmd.id === selectedCommand);
 
@@ -218,16 +230,6 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
         
         // Cleanup on unmount
         return () => {
-            if (websocketRef.current) {
-                try {
-                    if (websocketRef.current.readyState === WebSocket.OPEN) {
-                        websocketRef.current.close();
-                    }
-                } catch (error) {
-                    console.warn('Error closing WebSocket on unmount:', error);
-                }
-                websocketRef.current = null;
-            }
             if (durationIntervalRef.current) {
                 clearInterval(durationIntervalRef.current);
             }
@@ -237,13 +239,96 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
     const startRecording = useCallback(async () => {
         if (!currentConfig || currentConfig.category !== 'microphone') return;
 
+        console.log(`[UI] 🎤 Starting recording: ${currentConfig.name} (${currentConfig.mode} mode)`);
+        uiLogger.info('🎤 Starting recording process', {
+            command: currentConfig.id,
+            mode: currentConfig.mode,
+            operation: currentConfig.operation,
+            diarization: currentConfig.diarization
+        });
+        
+        // Log to terminal for debugging
+        uiLogger.info('🎤 UI Action: Start Recording', {
+            action: 'start_recording',
+            command: currentConfig.name,
+            mode: currentConfig.mode,
+            operation: currentConfig.operation,
+            diarization: currentConfig.diarization,
+            timestamp: new Date().toISOString()
+        });
+
         try {
             setError(null);
             setIsRecording(true);
             setRecordingDuration(0);
+            
+            // Record the start time for accurate duration calculation
+            recordingStartTimeRef.current = Date.now();
 
-            const audioRecorder = new AudioRecorder();
-            audioRecorderRef.current = audioRecorder;
+            if (useOptimizedRecorder) {
+                // Use optimized recorder for large files
+                console.log('🎤 Using optimized recorder for single mode');
+                
+                if (!optimizedAudioRecorderRef.current) {
+                    optimizedAudioRecorderRef.current = new OptimizedAudioRecorder({
+                        chunkInterval: 1000, // 1 second chunks
+                        onChunk: async (chunk: Blob, chunkIndex: number) => {
+                            console.log('📦 Optimized audio chunk received', {
+                                chunkIndex: chunkIndex,
+                                chunkSize: chunk.size,
+                                chunkType: chunk.type,
+                                recordingDuration: optimizedAudioRecorderRef.current?.getStatus().duration || 0
+                            });
+                            
+                            // Note: Continuous mode now uses ContinuousAudioRecorder with VAD
+                            // This onChunk callback is only used for single mode
+                        },
+                        onComplete: async (audioBlob: Blob, duration: number) => {
+                            console.log('✅ Optimized recording completed', {
+                                audioSize: audioBlob.size,
+                                duration: duration,
+                                audioSizeMB: (audioBlob.size / (1024 * 1024)).toFixed(2) + ' MB'
+                            });
+                            
+                            // Stop the duration timer
+                            if (durationIntervalRef.current) {
+                                clearInterval(durationIntervalRef.current);
+                                durationIntervalRef.current = null;
+                            }
+                            
+                            // Process the audio using optimized converter
+                            await processOptimizedAudio(audioBlob, duration);
+                        },
+                        onError: (error: Error) => {
+                            console.error('❌ Optimized recording error:', error);
+                            setError(`Recording error: ${error.message}`);
+                            setIsRecording(false);
+                            
+                            // Stop the duration timer
+                            if (durationIntervalRef.current) {
+                                clearInterval(durationIntervalRef.current);
+                                durationIntervalRef.current = null;
+                            }
+                        }
+                    });
+                }
+
+                audioLogger.info('OptimizedAudioRecorder initialized', {
+                    recorderType: 'OptimizedAudioRecorder',
+                    mode: currentConfig.mode
+                });
+            } else {
+                // Use legacy recorder for backward compatibility
+                console.log('🎤 Using legacy recorder for single mode');
+                
+                const audioRecorder = new AudioRecorder();
+                audioRecorderRef.current = audioRecorder;
+
+                audioLogger.info('AudioRecorder initialized', {
+                    recorderType: 'AudioRecorder',
+                    mode: currentConfig.mode
+                });
+            }
 
             // Start duration timer
             durationIntervalRef.current = setInterval(() => {
@@ -251,250 +336,576 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
             }, 100);
 
             if (currentConfig.mode === 'continuous') {
-                await startContinuousRecognition();
+                uiLogger.info('Starting continuous recognition mode with VAD-based silence detection');
+                
+                // Initialize continuous audio recorder with VAD
+                if (!continuousAudioRecorderRef.current) {
+                    continuousAudioRecorderRef.current = new ContinuousAudioRecorder({
+                        sampleRate: 16000,
+                        chunkSize: 8192,
+                        maxDurationSeconds: 390, // 6.5 minutes
+                        onChunkProcessed: async (audioData: Float32Array, sampleRate: number, reason: string) => {
+                            console.log(`🔄 Processing continuous chunk: ${reason}`);
+                            await processContinuousRecognitionMicrophone(audioData, sampleRate);
+                        },
+                        onVisualUpdate: (audioLevel: number, duration: number, sizeMB: number, status: string) => {
+                            setAudioLevel(audioLevel);
+                            setRecordingStatus(status);
+                            setRecordingDuration(duration);
+                        },
+                        onError: (error: Error) => {
+                            console.error('❌ Continuous recording error:', error);
+                            setError(`Continuous recording error: ${error.message}`);
+                            setIsRecording(false);
+                        }
+                    });
+                }
+
+                await continuousAudioRecorderRef.current.startRecording();
+                console.log('🎤 Continuous recording started with VAD-based silence detection');
             } else {
-                await startSingleRecognition();
+                // For single mode, start recording with the appropriate recorder
+                if (useOptimizedRecorder && optimizedAudioRecorderRef.current) {
+                    // Use optimized recorder
+                    await optimizedAudioRecorderRef.current.startRecording();
+                    console.log('🎤 Optimized recording started for single mode');
+                } else if (audioRecorderRef.current) {
+                    // Use legacy recorder
+                    audioRecorderRef.current.setOnDataAvailable((chunk: Blob) => {
+                        audioLogger.debug('Audio chunk received for single mode', {
+                            chunkSize: chunk.size,
+                            chunkType: chunk.type,
+                            timestamp: new Date().toISOString()
+                        });
+                    });
+
+                    await audioRecorderRef.current.startRecording();
+                    audioLogger.success('Audio recording started for single mode', {
+                        mode: 'single',
+                        operation: currentConfig.operation,
+                        diarization: currentConfig.diarization
+                    });
+                }
             }
         } catch (err) {
+            uiLogger.error('Recording failed', { error: err, command: currentConfig.id });
             setError(`Recording failed: ${err}`);
+            setIsRecording(false);
+        }
+    }, [currentConfig, useOptimizedRecorder]);
+
+    const stopRecording = useCallback(async () => {
+        // Calculate actual duration from start time
+        const actualDuration = recordingStartTimeRef.current 
+            ? (Date.now() - recordingStartTimeRef.current) / 1000 
+            : recordingDuration;
+            
+        console.log(`[UI] 🛑 Stopping recording: ${currentConfig?.name} (${actualDuration.toFixed(1)}s)`);
+        uiLogger.info('🛑 Stopping recording process', {
+            mode: currentConfig?.mode,
+            stateDuration: recordingDuration,
+            actualDuration: actualDuration,
+            isRecording
+        });
+        
+        // Log to terminal for debugging
+        uiLogger.info('🛑 UI Action: Stop Recording', {
+            action: 'stop_recording',
+            command: currentConfig?.name,
+            mode: currentConfig?.mode,
+            operation: currentConfig?.operation,
+            diarization: currentConfig?.diarization,
+            duration: actualDuration,
+            timestamp: new Date().toISOString()
+        });
+
+        if (useOptimizedRecorder && optimizedAudioRecorderRef.current) {
+            // Use optimized recorder
+            console.log('🛑 Stopping optimized recording...');
+            optimizedAudioRecorderRef.current.stopRecording();
+        } else if (audioRecorderRef.current) {
+            // Use legacy recorder
+            console.log('🛑 Stopping legacy recording...');
+            
+            // For single recognition, we need to get the audio data and send it
+            if (currentConfig?.mode === 'single') {
+                try {
+                    // Stop the audio recording first
+                    audioRecorderRef.current.stopRecording();
+                    audioLogger.success('Audio recording stopped for single mode');
+                    
+                    // Get the recorded audio data
+                    const audioBlob = await audioRecorderRef.current.getAudioBlob();
+                    
+                    // Calculate actual duration from start time
+                    const actualDuration = recordingStartTimeRef.current 
+                        ? (Date.now() - recordingStartTimeRef.current) / 1000 
+                        : recordingDuration;
+                    
+                    audioLogger.info('Retrieved audio blob for single recognition', {
+                        blobSize: audioBlob.size,
+                        blobType: audioBlob.type,
+                        stateDuration: recordingDuration,
+                        actualDuration: actualDuration,
+                        startTime: recordingStartTimeRef.current,
+                        endTime: Date.now()
+                    });
+                    
+                    if (audioBlob.size === 0) {
+                        uiLogger.error('No audio data captured', { blobSize: audioBlob.size });
+                        setError('No audio data captured. Please try recording again.');
+                        setIsRecording(false);
+                        return;
+                    }
+                    
+                    // Check if we have enough audio data (at least 0.5 seconds)
+                    // Use the actual calculated duration instead of state duration
+                    if (actualDuration < 0.5) {
+                        uiLogger.warning('Recording too short', { 
+                            stateDuration: recordingDuration,
+                            actualDuration: actualDuration,
+                            minimumRequired: 0.5 
+                        });
+                        setError('Recording too short. Please record for at least 0.5 seconds.');
+                        setIsRecording(false);
+                        return;
+                    }
+                    
+                    // Convert to base64 using chunked approach to avoid stack overflow
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    const uint8Array = new Uint8Array(arrayBuffer);
+                    
+                    audioLogger.debug('Audio blob conversion details', {
+                        originalSize: audioBlob.size,
+                        blobType: audioBlob.type,
+                        arrayBufferLength: arrayBuffer.byteLength,
+                        uint8ArrayLength: uint8Array.length,
+                        stateDuration: recordingDuration,
+                        actualDuration: actualDuration
+                    });
+                    
+                    // Convert WebM/Opus audio to raw PCM data
+                    console.log('🔄 Converting WebM/Opus audio to PCM format');
+                    uiLogger.info('🔄 Audio Conversion: WebM to PCM', {
+                        action: 'audio_conversion',
+                        inputSize: audioBlob.size,
+                        inputType: audioBlob.type,
+                        step: 'webm_to_pcm',
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    const conversionResult = await audioConverter.convertToPCM(audioBlob);
+                    
+                    // Convert PCM data to base64 for transmission
+                    console.log('🔄 Converting PCM to base64 for transmission');
+                    uiLogger.info('🔄 Audio Conversion: PCM to Base64', {
+                        action: 'audio_conversion',
+                        pcmSize: conversionResult.pcmData.length,
+                        sampleRate: conversionResult.sampleRate,
+                        step: 'pcm_to_base64',
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    // Use optimized base64 conversion for WebSocket transmission
+                    const base64Audio = audioConverter.convertPCMToBase64(conversionResult.pcmData);
+                    
+                    audioLogger.success('Audio converted to PCM and base64', {
+                        originalSize: conversionResult.originalSize,
+                        originalSizeMB: (conversionResult.originalSize / (1024 * 1024)).toFixed(2) + ' MB',
+                        pcmLength: conversionResult.pcmData.length,
+                        pcmDuration: (conversionResult.pcmData.length / conversionResult.sampleRate).toFixed(2) + 's',
+                        base64Length: base64Audio.length,
+                        base64LengthMB: (base64Audio.length / (1024 * 1024)).toFixed(2) + ' MB',
+                        sampleRate: conversionResult.sampleRate,
+                        duration: conversionResult.duration,
+                        durationMinutes: (conversionResult.duration / 60).toFixed(2) + ' min',
+                        compressionRatio: (base64Audio.length / conversionResult.originalSize).toFixed(2),
+                        expectedPCMLength: Math.floor(conversionResult.duration * conversionResult.sampleRate),
+                        pcmLengthMatch: conversionResult.pcmData.length === Math.floor(conversionResult.duration * conversionResult.sampleRate) ? '✅ MATCH' : '❌ MISMATCH'
+                    });
+                    
+                    // Now set up WebSocket connection and send the audio data
+                    uiLogger.dataFlow('UI', 'WebSocket', { 
+                        audioLength: base64Audio.length,
+                        operation: currentConfig.operation,
+                        diarization: currentConfig.diarization,
+                        actualDuration: actualDuration
+                    }, 'Single recognition audio data');
+                    
+                    // Log to terminal for debugging
+                    uiLogger.info('📤 WebSocket Data Transmission', {
+                        action: 'websocket_transmission',
+                        audioLength: base64Audio.length,
+                        audioLengthMB: (base64Audio.length / (1024 * 1024)).toFixed(2) + ' MB',
+                        operation: currentConfig.operation,
+                        diarization: currentConfig.diarization,
+                        actualDuration: actualDuration,
+                        actualDurationMinutes: (actualDuration / 60).toFixed(2) + ' min',
+                        pcmLength: conversionResult.pcmData.length,
+                        pcmDuration: (conversionResult.pcmData.length / conversionResult.sampleRate).toFixed(2) + 's',
+                        sampleRate: conversionResult.sampleRate,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    await processSingleRecognitionMicrophone(conversionResult.pcmData, conversionResult.sampleRate);
+                    
+                } catch (error) {
+                    console.error('❌ Error processing audio data:', error);
+                    console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+                    console.error('❌ Error details:', {
+                        name: error instanceof Error ? error.name : 'Unknown',
+                        message: error instanceof Error ? error.message : String(error),
+                        cause: error instanceof Error ? error.cause : undefined
+                    });
+                    
+                    uiLogger.error('Error processing audio data', { 
+                        error: error instanceof Error ? {
+                            name: error.name,
+                            message: error.message,
+                            stack: error.stack,
+                            cause: error.cause
+                        } : {
+                            type: typeof error,
+                            value: String(error)
+                        },
+                        mode: 'single',
+                        stateDuration: recordingDuration,
+                        actualDuration: actualDuration
+                    });
+                    
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    setError(`Failed to process audio: ${errorMessage}`);
+                    setIsProcessing(false);
+                    setIsRecording(false);
+                }
+            } else if (currentConfig?.mode === 'continuous' && continuousAudioRecorderRef.current) {
+                // For continuous mode, stop the continuous audio recorder
+                audioLogger.info('Stopping continuous recording mode with VAD');
+                await continuousAudioRecorderRef.current.stopRecording();
+            } else {
+                // For continuous mode, just stop recording
+                audioLogger.info('Stopping continuous recording mode');
+                if (audioRecorderRef.current) {
+                    audioRecorderRef.current.stopRecording();
+                }
+            }
+        }
+        
+        if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current);
+        }
+        
+        // WebSocket cleanup is no longer needed for continuous mode
+        // as we're using REST API for all microphone processing
+        
+        // Only set recording to false for continuous mode
+        // For single mode, keep recording state until we get the result
+        if (currentConfig?.mode === 'continuous') {
             setIsRecording(false);
         }
     }, [currentConfig]);
 
-    const stopRecording = useCallback(() => {
-        if (audioRecorderRef.current) {
-            audioRecorderRef.current.stopRecording();
-        }
-        if (durationIntervalRef.current) {
-            clearInterval(durationIntervalRef.current);
-        }
-        if (websocketRef.current) {
-            try {
-                if (currentConfig?.mode === 'continuous' && websocketRef.current.readyState === WebSocket.OPEN) {
-                    // Send stop message for continuous mode
-                    apiClientRef.current?.sendStopRecognition(websocketRef.current);
-                }
-            } catch (error) {
-                console.warn('Error sending stop message:', error);
-            } finally {
-                websocketRef.current.close();
-                websocketRef.current = null;
+    const processOptimizedAudio = async (audioBlob: Blob, duration: number) => {
+        try {
+            console.log('🔄 Processing optimized audio', {
+                audioSize: audioBlob.size,
+                duration: duration,
+                audioSizeMB: (audioBlob.size / (1024 * 1024)).toFixed(2) + ' MB'
+            });
+
+            // Initialize optimized converter if needed
+            if (!optimizedAudioConverterRef.current) {
+                optimizedAudioConverterRef.current = new OptimizedAudioConverter();
             }
-        }
-        setIsRecording(false);
-    }, [currentConfig]);
 
-    const startSingleRecognition = async () => {
-        try {
-            console.log('Starting single recognition...');
+            // Convert audio to PCM and base64
+            const conversionResult = await optimizedAudioConverterRef.current.convertToPCM(audioBlob);
             
-            // Connect to WebSocket and wait for connection to be established
-            const ws = await new Promise<WebSocket>((resolve, reject) => {
-                const wsUrl = (apiClientRef.current as any).baseUrl.replace('http', 'ws') + '/ws/recognize';
-                const ws = new WebSocket(wsUrl);
+            console.log('✅ Optimized audio conversion completed', {
+                pcmLength: conversionResult.pcmData.length,
+                sampleRate: conversionResult.sampleRate,
+                duration: conversionResult.duration,
+                base64Length: conversionResult.base64Data.length,
+                base64LengthMB: (conversionResult.base64Data.length / (1024 * 1024)).toFixed(2) + ' MB'
+            });
+
+            // Log the data being sent to backend
+            console.log('📤 Frontend sending data to backend', {
+              base64Length: conversionResult.base64Data.length,
+              base64LengthMB: (conversionResult.base64Data.length / (1024 * 1024)).toFixed(2) + ' MB',
+              pcmLength: conversionResult.pcmData.length,
+              duration: conversionResult.duration,
+              durationMinutes: (conversionResult.duration / 60).toFixed(2) + ' min',
+              sampleRate: conversionResult.sampleRate,
+              originalSize: conversionResult.originalSize,
+              originalSizeMB: (conversionResult.originalSize / (1024 * 1024)).toFixed(2) + ' MB'
+            });
+
+            // Log to terminal for debugging
+            uiLogger.info('📤 Frontend Data Transmission', {
+              action: 'frontend_data_transmission',
+              base64Length: conversionResult.base64Data.length,
+              base64LengthMB: (conversionResult.base64Data.length / (1024 * 1024)).toFixed(2) + ' MB',
+              pcmLength: conversionResult.pcmData.length,
+              duration: conversionResult.duration,
+              durationMinutes: (conversionResult.duration / 60).toFixed(2) + ' min',
+              sampleRate: conversionResult.sampleRate,
+              originalSize: conversionResult.originalSize,
+              originalSizeMB: (conversionResult.originalSize / (1024 * 1024)).toFixed(2) + ' MB',
+              timestamp: new Date().toISOString()
+            });
+
+            // Process the audio using the microphone REST API (like speech_demo.py)
+            await processSingleRecognitionMicrophone(conversionResult.pcmData, conversionResult.sampleRate);
+
+        } catch (error) {
+            console.error('❌ Optimized audio processing failed:', error);
+            setError(`Audio processing failed: ${error instanceof Error ? error.message : String(error)}`);
+            setIsProcessing(false);
+        }
+    };
+
+    const processSingleRecognitionMicrophone = async (pcmData: Float32Array, sampleRate: number) => {
+        try {
+            // Calculate actual duration for logging
+            const actualDuration = recordingStartTimeRef.current 
+                ? (Date.now() - recordingStartTimeRef.current) / 1000 
+                : recordingDuration;
                 
-                ws.onopen = () => {
-                    console.log('🔌 WebSocket connected for single recognition');
-                    resolve(ws);
-                };
-                
-                ws.onerror = (error) => {
-                    console.error('💥 WebSocket connection error:', error);
-                    reject(new Error('WebSocket connection failed'));
-                };
-                
-                ws.onclose = (event) => {
-                    if (event.code !== 1000) {
-                        reject(new Error(`WebSocket closed unexpectedly: ${event.code}`));
-                    }
-                };
+            uiLogger.processing('Processing single microphone audio (like speech_demo.py)', {
+                audioSamples: pcmData.length,
+                sampleRate: sampleRate,
+                duration: actualDuration,
+                operation: currentConfig?.operation,
+                diarization: currentConfig?.diarization
             });
             
-            websocketRef.current = ws;
+            setError('🔄 Processing audio... Please wait.');
+            setIsProcessing(true);
             
-            // Set up message handlers
-            ws.onmessage = (event: MessageEvent<string>) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    console.log('📨 Single recognition message:', data);
-                    
-                    if (data.type === 'recognition_result') {
-                        const result: RecognitionResult = {
-                            text: data.data.text || '',
-                            confidence: data.data.confidence || 0.95,
-                            language: data.data.language || 'auto-detected',
-                            timestamps: data.data.timestamps || [],
-                            timestamp: new Date().toISOString(),
-                            is_translation: data.data.is_translation || false,
-                            enable_diarization: data.data.enable_diarization || false,
-                        };
-                        
-                        // Check if it's a diarization result
-                        if (result.segments && result.segments.length > 0) {
-                            const diarizationResult: DiarizationResult = {
-                                segments: result.segments,
-                                num_speakers: result.num_speakers || 0,
-                                is_translation: currentConfig?.operation === 'translation',
-                                enable_diarization: true,
-                                timestamp: new Date().toISOString()
-                            };
-                            setDiarizationResults(prev => [...prev, diarizationResult]);
-                        } else {
-                            setResults(prev => [...prev, result]);
-                        }
-                    } else if (data.type === 'diarization_result') {
-                        const diarizationResult: DiarizationResult = {
-                            segments: data.data.segments || [],
-                            num_speakers: data.data.num_speakers || 0,
-                            is_translation: currentConfig?.operation === 'translation',
-                            enable_diarization: true,
-                            timestamp: new Date().toISOString()
-                        };
-                        setDiarizationResults(prev => [...prev, diarizationResult]);
-                    } else if (data.type === 'error') {
-                        setError(data.data?.message || 'Unknown error occurred');
-                    }
-                } catch (error) {
-                    console.error('Error parsing WebSocket message:', error);
-                    setError('Failed to parse server response');
-                }
-            };
+            console.log('📤 Starting single microphone processing (like speech_demo.py)', {
+                audioSamples: pcmData.length,
+                sampleRate: sampleRate,
+                duration: actualDuration,
+                operation: currentConfig?.operation,
+                diarization: currentConfig?.diarization
+            });
+
+            // Convert Float32Array to regular array for JSON serialization - EXACTLY like speech_demo.py
+            const audioArray = Array.from(pcmData);
+
+            // Send to single microphone endpoint - EXACTLY like speech_demo.py process_microphone_single
+            const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            console.log('🔍 API Base URL:', apiBaseUrl);
+            console.log('🔍 Full URL:', `${apiBaseUrl}/api/v1/recognize-microphone`);
             
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                setError('WebSocket connection error');
-            };
-            
-            ws.onclose = (event) => {
-                console.log('WebSocket closed:', event.code, event.reason);
-                if (event.code !== 1000 && event.code !== 1005) {
-                    setError(`WebSocket closed unexpectedly: ${event.code} ${event.reason}`);
-                }
-            };
-            
-            // Now send the single recognition message
-            ws.send(JSON.stringify({
-                type: 'single_recognition',
-                data: {
-                    is_translation: currentConfig?.operation === 'translation',
+            const response = await fetch(`${apiBaseUrl}/api/v1/recognize-microphone`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    audio_data: audioArray,
+                    sample_rate: sampleRate,
                     enable_diarization: currentConfig?.diarization || false,
+                    is_translation: currentConfig?.operation === 'translation',
                     target_language: 'en'
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            
+            console.log('📥 Received single microphone response:', result);
+            
+            if (result.success) {
+                // Check if this is a diarization result
+                if (result.segments && result.segments.length > 0) {
+                    // Handle diarization result
+                    const diarizationResult: DiarizationResult = {
+                        segments: result.segments.map((segment: { speaker_id: string; text: string; start_time?: number; end_time?: number }) => ({
+                            speaker_id: segment.speaker_id,
+                            text: segment.text,
+                            start_time: segment.start_time || 0.0,
+                            end_time: segment.end_time || 0.0
+                        })),
+                        num_speakers: result.num_speakers || 0,
+                        is_translation: currentConfig?.operation === 'translation',
+                        enable_diarization: true,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    setDiarizationResults(prev => [...prev, diarizationResult]);
+                    console.log('✅ Diarization result processed:', {
+                        numSpeakers: diarizationResult.num_speakers,
+                        segmentsCount: diarizationResult.segments.length,
+                        isTranslation: diarizationResult.is_translation
+                    });
+                } else {
+                    // Handle regular recognition result
+                    const recognitionResult: RecognitionResult = {
+                        text: result.text || 'No text returned',
+                        confidence: result.confidence || 0.0,
+                        language: result.language || 'Unknown',
+                        timestamp: new Date().toISOString(),
+                        duration: actualDuration,
+                        hasError: false
+                    };
+                    
+                    setResults(prev => [...prev, recognitionResult]);
                 }
-            }));
+                
+                setError('');
+            } else {
+                setError(`Recognition failed: ${result.error || 'Unknown error'}`);
+            }
+            
+            setIsProcessing(false);
+            setIsRecording(false);
             
         } catch (error) {
-            console.error('Error starting single recognition:', error);
-            setError(`Failed to start single recognition: ${error}`);
+            console.error('Error processing single microphone audio:', error);
+            uiLogger.error('Failed to process single microphone audio', {
+                error: error instanceof Error ? error.message : String(error),
+                audioSamples: pcmData.length,
+                sampleRate: sampleRate,
+                operation: currentConfig?.operation,
+                actualDuration: recordingStartTimeRef.current 
+                    ? (Date.now() - recordingStartTimeRef.current) / 1000 
+                    : recordingDuration
+            });
+            setError(`Failed to process audio: ${error instanceof Error ? error.message : String(error)}`);
+            setIsProcessing(false);
+            setIsRecording(false);
         }
     };
 
-    const startContinuousRecognition = async () => {
+
+    const processContinuousRecognitionMicrophone = async (pcmData: Float32Array, sampleRate: number) => {
         try {
-            console.log('Starting continuous recognition...');
-            
-            // Connect to WebSocket and wait for connection to be established
-            const ws = await new Promise<WebSocket>((resolve, reject) => {
-                const wsUrl = (apiClientRef.current as any).baseUrl.replace('http', 'ws') + '/ws/recognize';
-                const ws = new WebSocket(wsUrl);
+            // Calculate actual duration for logging
+            const actualDuration = recordingStartTimeRef.current 
+                ? (Date.now() - recordingStartTimeRef.current) / 1000 
+                : recordingDuration;
                 
-                ws.onopen = () => {
-                    console.log('🔌 WebSocket connected for continuous recognition');
-                    resolve(ws);
-                };
-                
-                ws.onerror = (error) => {
-                    console.error('💥 WebSocket connection error:', error);
-                    reject(new Error('WebSocket connection failed'));
-                };
-                
-                ws.onclose = (event) => {
-                    if (event.code !== 1000) {
-                        reject(new Error(`WebSocket closed unexpectedly: ${event.code}`));
-                    }
-                };
+            uiLogger.processing('Processing continuous microphone audio chunk (like speech_demo.py)', {
+                audioSamples: pcmData.length,
+                sampleRate: sampleRate,
+                duration: actualDuration,
+                operation: currentConfig?.operation,
+                diarization: currentConfig?.diarization
             });
             
-            websocketRef.current = ws;
+            console.log('📤 Starting continuous microphone processing (like speech_demo.py)', {
+                audioSamples: pcmData.length,
+                sampleRate: sampleRate,
+                duration: actualDuration,
+                operation: currentConfig?.operation,
+                diarization: currentConfig?.diarization
+            });
+
+            // Convert Float32Array to regular array for JSON serialization - EXACTLY like speech_demo.py
+            const audioArray = Array.from(pcmData);
+
+            // Send to continuous microphone endpoint - EXACTLY like speech_demo.py process_microphone_continuous
+            const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            console.log('🔍 API Base URL:', apiBaseUrl);
+            console.log('🔍 Full URL:', `${apiBaseUrl}/api/v1/recognize-microphone-continuous`);
             
-            // Set up message handlers
-            ws.onmessage = (event: MessageEvent<string>) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    console.log('📨 Continuous recognition message:', data);
-                    
-                    if (data.type === 'recognition_result') {
-                        const result: RecognitionResult = {
-                            text: data.data.text || '',
-                            confidence: data.data.confidence || 0.95,
-                            language: data.data.language || 'auto-detected',
-                            timestamps: data.data.timestamps || [],
-                            timestamp: new Date().toISOString(),
-                            is_translation: data.data.is_translation || false,
-                            enable_diarization: data.data.enable_diarization || false,
-                        };
-                        
-                        // Check if it's a diarization result
-                        if (result.segments && result.segments.length > 0) {
-                            const diarizationResult: DiarizationResult = {
-                                segments: result.segments,
-                                num_speakers: result.num_speakers || 0,
-                                is_translation: currentConfig?.operation === 'translation',
-                                enable_diarization: true,
-                                timestamp: new Date().toISOString()
-                            };
-                            setDiarizationResults(prev => [...prev, diarizationResult]);
-                        } else {
-                            setResults(prev => [...prev, result]);
-                        }
-                    } else if (data.type === 'diarization_result') {
-                        const diarizationResult: DiarizationResult = {
-                            segments: data.data.segments || [],
-                            num_speakers: data.data.num_speakers || 0,
-                            is_translation: currentConfig?.operation === 'translation',
-                            enable_diarization: true,
-                            timestamp: new Date().toISOString()
-                        };
-                        setDiarizationResults(prev => [...prev, diarizationResult]);
-                    } else if (data.type === 'error') {
-                        setError(data.data?.message || 'Unknown error occurred');
-                    }
-                } catch (error) {
-                    console.error('Error parsing WebSocket message:', error);
-                    setError('Failed to parse server response');
-                }
-            };
-            
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                setError('WebSocket connection error');
-            };
-            
-            ws.onclose = (event) => {
-                console.log('WebSocket closed:', event.code, event.reason);
-                if (event.code !== 1000 && event.code !== 1005) {
-                    setError(`WebSocket closed unexpectedly: ${event.code} ${event.reason}`);
-                }
-            };
-            
-            // Now send the start recognition message
-            ws.send(JSON.stringify({
-                type: 'start_recognition',
-                data: {
-                    is_translation: currentConfig?.operation === 'translation',
+            const response = await fetch(`${apiBaseUrl}/api/v1/recognize-microphone-continuous`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    audio_data: audioArray,
+                    sample_rate: sampleRate,
                     enable_diarization: currentConfig?.diarization || false,
-                    target_language: 'en',
-                    mode: 'continuous'
+                    is_translation: currentConfig?.operation === 'translation',
+                    target_language: 'en'
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            
+            console.log('📥 Received continuous microphone response:', result);
+            
+            if (result.success) {
+                // Check if this is a diarization result
+                if (result.segments && result.segments.length > 0) {
+                    // Handle diarization result
+                    const diarizationResult: DiarizationResult = {
+                        segments: result.segments.map((segment: { speaker_id: string; text: string; start_time?: number; end_time?: number }) => ({
+                            speaker_id: segment.speaker_id,
+                            text: segment.text,
+                            start_time: segment.start_time || 0.0,
+                            end_time: segment.end_time || 0.0
+                        })),
+                        num_speakers: result.num_speakers || 0,
+                        is_translation: currentConfig?.operation === 'translation',
+                        enable_diarization: true,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    setDiarizationResults(prev => [...prev, diarizationResult]);
+                    console.log('✅ Continuous diarization result processed:', {
+                        numSpeakers: diarizationResult.num_speakers,
+                        segmentsCount: diarizationResult.segments.length,
+                        isTranslation: diarizationResult.is_translation
+                    });
+                } else {
+                    // Handle regular recognition result
+                    const recognitionResult: RecognitionResult = {
+                        text: result.text || 'No text returned',
+                        confidence: result.confidence || 0.0,
+                        language: result.language || 'Unknown',
+                        timestamp: new Date().toISOString(),
+                        duration: actualDuration,
+                        hasError: false
+                    };
+                    
+                    setResults(prev => [...prev, recognitionResult]);
                 }
-            }));
+                
+                setError('');
+            } else {
+                console.warn(`Continuous recognition warning: ${result.error || 'Unknown error'}`);
+            }
             
         } catch (error) {
-            console.error('Error starting continuous recognition:', error);
-            setError(`Failed to start continuous recognition: ${error}`);
+            console.error('Error processing continuous microphone audio:', error);
+            uiLogger.error('Failed to process continuous microphone audio', {
+                error: error instanceof Error ? error.message : String(error),
+                audioSamples: pcmData.length,
+                sampleRate: sampleRate,
+                operation: currentConfig?.operation,
+                actualDuration: recordingStartTimeRef.current 
+                    ? (Date.now() - recordingStartTimeRef.current) / 1000 
+                    : recordingDuration
+            });
+            // Don't set error for continuous mode, just log it
         }
     };
+
 
     const handleFileUpload = useCallback(async (file: File) => {
         if (!currentConfig || currentConfig.category !== 'file') return;
+
+        uiLogger.info('Starting file upload process', {
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type,
+            command: currentConfig.id,
+            operation: currentConfig.operation,
+            diarization: currentConfig.diarization
+        });
 
         try {
             setError(null);
@@ -504,17 +915,39 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
             
             // Convert file to ArrayBuffer
             const arrayBuffer = await file.arrayBuffer();
+            
+            uiLogger.dataFlow('UI', 'API', {
+                fileName: file.name,
+                fileSize: file.size,
+                arrayBufferSize: arrayBuffer.byteLength,
+                operation: currentConfig.operation,
+                diarization: currentConfig.diarization
+            }, 'File upload data');
 
             // Show processing message based on operation type
             if (currentConfig.diarization) {
                 setIsDiarizationProcessing(true);
                 setError('🔄 Processing file with diarization... This may take 30-60 seconds for long audio files. Please wait while we analyze speaker segments...');
+                uiLogger.info('File processing with diarization enabled', {
+                    fileName: file.name,
+                    estimatedTime: '30-60 seconds'
+                });
             } else {
                 setError('🔄 Processing file... Please wait.');
+                uiLogger.info('File processing without diarization', {
+                    fileName: file.name
+                });
             }
 
             // Call appropriate API endpoint
-            const response = await apiClientRef.current!.transcribeAudio(
+            apiLogger.info('Calling processAudio API', {
+                endpoint: 'processAudio',
+                operation: currentConfig.operation,
+                diarization: currentConfig.diarization,
+                fileSize: arrayBuffer.byteLength
+            });
+            
+            const response = await apiClientRef.current!.processAudio(
                 arrayBuffer,
                 currentConfig.operation === 'translation',
                 'en',
@@ -523,6 +956,15 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
 
             const endTime = performance.now();
             const processingTime = endTime - startTime;
+
+            apiLogger.success('API response received', {
+                processingTime: processingTime,
+                responseType: response.segments ? 'diarization' : 'recognition',
+                hasText: !!response.text,
+                hasSegments: !!(response.segments && response.segments.length > 0),
+                segmentsCount: response.segments?.length || 0,
+                numSpeakers: response.num_speakers || 0
+            });
 
             // Update performance metrics
             setPerformanceMetrics(prev => ({
@@ -547,6 +989,13 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                     enable_diarization: true,
                     timestamp: new Date().toISOString()
                 };
+                
+                uiLogger.success('Diarization result processed', {
+                    numSpeakers: diarizationResult.num_speakers,
+                    segmentsCount: diarizationResult.segments.length,
+                    isTranslation: diarizationResult.is_translation
+                });
+                
                 setDiarizationResults(prev => [...prev, diarizationResult]);
             } else if (response.text) {
                 // Regular recognition result
@@ -558,11 +1007,26 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                     is_translation: currentConfig.operation === 'translation',
                     enable_diarization: currentConfig.diarization
                 };
+                
+                uiLogger.success('Recognition result processed', {
+                    text: recognitionResult.text,
+                    confidence: recognitionResult.confidence,
+                    language: recognitionResult.language,
+                    isTranslation: recognitionResult.is_translation
+                });
+                
                 setResults(prev => [...prev, recognitionResult]);
             } else {
+                uiLogger.error('No valid response data received', { response: response });
                 setError('No text or segments received from API');
             }
         } catch (err) {
+            uiLogger.error('File processing failed', { 
+                error: err,
+                fileName: file.name,
+                fileSize: file.size,
+                command: currentConfig.id
+            });
             setError(`File processing failed: ${err}`);
         } finally {
             setIsProcessing(false);
@@ -571,16 +1035,30 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
     }, [currentConfig]);
 
     const clearResults = useCallback(() => {
+        console.log(`[UI] 🧹 Clear Results clicked (${results.length} results, ${diarizationResults.length} diarization)`);
+        uiLogger.info('🧹 Clear Results clicked', {
+            currentResultsCount: results.length,
+            currentDiarizationResultsCount: diarizationResults.length,
+            hasError: !!error
+        });
         setResults([]);
         setDiarizationResults([]);
         setError(null);
-    }, []);
+    }, [results.length, diarizationResults.length, error]);
 
     const downloadResults = useCallback(() => {
         const allResults = [
             ...results.map(r => ({ type: 'recognition', ...r })),
             ...diarizationResults.map(d => ({ type: 'diarization', ...d }))
         ];
+        
+        console.log(`[UI] 📥 Download Results clicked (${allResults.length} total results)`);
+        uiLogger.info('📥 Download Results clicked', {
+            totalResults: allResults.length,
+            recognitionResults: results.length,
+            diarizationResults: diarizationResults.length,
+            fileName: `speech_results_${Date.now()}.json`
+        });
         
         const blob = new Blob([JSON.stringify(allResults, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -610,7 +1088,19 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                         {COMMAND_CONFIGS.map((config) => (
                             <button
                                 key={config.id}
-                                onClick={() => setSelectedCommand(config.id)}
+                                onClick={() => {
+                                    console.log(`[UI] 🎯 Command selected: ${config.name} (${config.id})`);
+                                    uiLogger.info('🎯 Command selected', {
+                                        commandId: config.id,
+                                        commandName: config.name,
+                                        category: config.category,
+                                        mode: config.mode,
+                                        operation: config.operation,
+                                        diarization: config.diarization,
+                                        endpoint: config.endpoint
+                                    });
+                                    setSelectedCommand(config.id);
+                                }}
                                 className={`p-4 rounded-lg border-2 transition-all ${
                                     selectedCommand === config.id
                                         ? 'border-blue-500 bg-blue-50'
@@ -686,8 +1176,31 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                                 </button>
                                 
                                 {isRecording && (
-                                    <div className="text-sm text-gray-600">
-                                        Duration: {recordingDuration.toFixed(1)}s
+                                    <div className="text-sm text-gray-600 space-y-2">
+                                        <div>Duration: {recordingDuration.toFixed(1)}s</div>
+                                        {currentConfig?.mode === 'continuous' && (
+                                            <div className="space-y-1">
+                                                <div className="flex items-center space-x-2">
+                                                    <span>Audio Level:</span>
+                                                    <div className="flex space-x-1">
+                                                        {Array.from({ length: 20 }, (_, i) => (
+                                                            <div
+                                                                key={i}
+                                                                className={`w-1 h-3 ${
+                                                                    i < audioLevel * 20 
+                                                                        ? 'bg-green-500' 
+                                                                        : 'bg-gray-300'
+                                                                }`}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                    <span className="text-xs">{(audioLevel * 100).toFixed(0)}%</span>
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    Status: {recordingStatus}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -713,12 +1226,36 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                         </button>
 
                         <button
-                            onClick={() => setShowMetrics(!showMetrics)}
+                            onClick={() => {
+                                uiLogger.info('📊 Performance Metrics toggle clicked', {
+                                    currentState: showMetrics,
+                                    newState: !showMetrics,
+                                    metrics: performanceMetrics
+                                });
+                                setShowMetrics(!showMetrics);
+                            }}
                             className="flex items-center space-x-2 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
                         >
                             <Settings className="w-4 h-4" />
                             <span>Performance Metrics</span>
                         </button>
+                    </div>
+                    
+                    {/* Optimized Recorder Toggle */}
+                    <div className="flex items-center space-x-2 p-3 bg-gray-50 rounded-lg border">
+                        <input
+                            type="checkbox"
+                            id="optimized-recorder"
+                            checked={useOptimizedRecorder}
+                            onChange={(e) => setUseOptimizedRecorder(e.target.checked)}
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <label htmlFor="optimized-recorder" className="text-sm text-gray-700 cursor-pointer">
+                            🚀 Use Optimized Recorder (for 60+ min recordings)
+                        </label>
+                        <div className="text-xs text-gray-500 ml-2">
+                            {useOptimizedRecorder ? '✅ Enabled' : '❌ Disabled'}
+                        </div>
                     </div>
                 </div>
 

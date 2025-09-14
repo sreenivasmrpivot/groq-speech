@@ -20,12 +20,16 @@ Architecture:
 import os
 import sys
 import json
+import asyncio
+import threading
+import queue
+import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -97,7 +101,9 @@ class HealthResponse(BaseModel):
     api_key_configured: bool
 
 
-# Global state - WebSocket functionality removed
+# Global state
+active_connections: List[WebSocket] = []
+recognition_sessions: Dict[str, Dict[str, Any]] = {}
 
 
 @asynccontextmanager

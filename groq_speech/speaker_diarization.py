@@ -58,34 +58,16 @@ USAGE EXAMPLES:
     diarized_result = recognizer.recognize_with_diarization(audio_data)
 """
 
-import os
-import time
-from typing import List, Dict, Any, Optional
+import asyncio
+import concurrent.futures
+from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
-import soundfile as sf
-import torch
+
+# Import structured logging
+from .logging_utils import diarization_logger, log_debug, log_info, log_success, log_warning, log_error
 
 
-def log_debug(message: str, verbose: bool = False):
-    """Log debug message only in verbose mode."""
-    if verbose:
-        print(f"🔍 {message}")
-
-def log_info(message: str):
-    """Log info message always."""
-    print(f"ℹ️  {message}")
-
-def log_success(message: str):
-    """Log success message always."""
-    print(f"✅ {message}")
-
-def log_warning(message: str):
-    """Log warning message always."""
-    print(f"⚠️  {message}")
-
-def log_error(message: str):
-    """Log error message always."""
-    print(f"❌ {message}")
+# Legacy logging functions removed - using structured logging from logging_utils
 
 # Lazy import Pyannote to avoid loading it when not needed
 PYANNOTE_AVAILABLE = None
@@ -109,7 +91,7 @@ def _import_pyannote():
         print(
             "Warning: Pyannote.audio not available. Install with: pip install pyannote.audio"
         )
-        
+
         # Create a fallback Annotation class for when Pyannote is not available
         class Annotation:
             def itertracks(self, yield_label=False):
@@ -118,7 +100,6 @@ def _import_pyannote():
         return False
 
 
-from .speech_config import SpeechConfig
 # DiarizationError removed - using standard exceptions
 
 
@@ -599,31 +580,246 @@ class AudioSegmenter:
 
 
 # Simplified Diarizer class that combines both basic and enhanced functionality
-# Simplified Diarizer class that combines both basic and enhanced functionality
-# Simplified Diarizer class that combines both basic and enhanced functionality
-# Simplified Diarizer class that combines both basic and enhanced functionality
 class Diarizer:
     """Simplified diarizer that provides enhanced functionality by default."""
     
     def __init__(self, config: Optional[DiarizationConfig] = None):
         self.config = config or DiarizationConfig()
         # Direct implementation without base diarizer
+        self.max_concurrent_requests = 5  # Limit concurrent API calls
+    
+    async def _transcribe_audio_async(self, speech_recognizer, audio_chunk: np.ndarray, mode: str, group_idx: int, verbose: bool = False) -> Tuple[Optional[SpeakerSegment], int]:
+        """
+        Async wrapper for transcribing a single audio chunk.
         
-    def diarize(self, audio_file: str, mode: str, speech_recognizer=None, verbose: bool = False) -> DiarizationResult:
+        Args:
+            speech_recognizer: SpeechRecognizer instance
+            audio_chunk: Audio data to transcribe
+            mode: 'transcription' or 'translation'
+            group_idx: Group index for logging
+            verbose: Verbose logging
+            
+        Returns:
+            Tuple of (SpeakerSegment or None, group_idx)
+        """
+        try:
+            # Run the synchronous transcription in a thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                if mode == "translation":
+                    result = await loop.run_in_executor(
+                        executor, speech_recognizer.translate_audio_data, audio_chunk
+                    )
+                else:
+                    result = await loop.run_in_executor(
+                        executor, speech_recognizer.recognize_audio_data, audio_chunk
+                    )
+            
+            if result and result.text:
+                log_debug(f"✅ Group {group_idx+1}: {result.text}", verbose)
+                return result, group_idx
+            else:
+                log_debug(f"⚠️ Group {group_idx+1}: No text detected", verbose)
+                return None, group_idx
+                
+        except Exception as e:
+            log_debug(f"❌ Group {group_idx+1} transcription failed: {e}", verbose)
+            return None, group_idx
+    
+    async def _process_segments_parallel(self, grouped_segments: List[Dict], audio_file: str, mode: str, 
+                                       speech_recognizer, verbose: bool = False) -> Tuple[List[SpeakerSegment], Dict[str, str]]:
+        """
+        Process all speaker segments in parallel using asyncio.
+        
+        Args:
+            grouped_segments: List of grouped speaker segments
+            audio_file: Path to audio file
+            mode: 'transcription' or 'translation'
+            speech_recognizer: SpeechRecognizer instance
+            verbose: Verbose logging
+            
+        Returns:
+            List of SpeakerSegment objects
+        """
+        diarization_logger.info(f"🚀 Processing {len(grouped_segments)} speaker groups in parallel...")
+        
+        # Create speaker mapping
+        speaker_mapping = {}
+        speaker_counter = 0
+        
+        # Prepare tasks for parallel execution
+        tasks = []
+        group_data = []
+        
+        for group_idx, group in enumerate(grouped_segments):
+            log_debug(f"Preparing group {group_idx+1}/{len(grouped_segments)}: "
+                      f"{len(group['segments'])} segments, {group['total_duration']:.1f}s, {group['total_size_mb']:.1f}MB", verbose)
+            
+            # Map Pyannote speaker labels to consistent IDs
+            if group['speaker'] not in speaker_mapping:
+                speaker_counter += 1
+                speaker_mapping[group['speaker']] = f"SPEAKER_{speaker_counter-1:02d}"
+            
+            speaker_id = speaker_mapping[group['speaker']]
+            
+            # Extract combined audio chunk for this speaker group
+            combined_chunk = self._extract_audio_chunk(
+                audio_file, group['start_time'], group['end_time']
+            )
+            
+            if combined_chunk is None:
+                print(f"      ⚠️ Skipping group {group_idx+1} - audio extraction failed")
+                continue
+            
+            # Create async task for this group (don't await here!)
+            task = self._transcribe_audio_async(
+                speech_recognizer, combined_chunk, mode, group_idx, verbose
+            )
+            tasks.append(task)
+            group_data.append({
+                'group': group,
+                'speaker_id': speaker_id,
+                'group_idx': group_idx
+            })
+        
+        if not tasks:
+            return [], speaker_mapping
+        
+        # Execute all tasks in parallel with concurrency limit
+        semaphore = asyncio.Semaphore(self.max_concurrent_requests)
+        
+        async def limited_transcribe(coro, group_info):
+            async with semaphore:
+                transcription_result, group_idx = await coro
+                return transcription_result, group_info
+        
+        # Run all tasks with concurrency control
+        limited_tasks = [
+            limited_transcribe(task, group_data[i]) 
+            for i, task in enumerate(tasks)
+        ]
+        
+        # Convert coroutines to Tasks for proper cancellation handling
+        task_objects = [asyncio.create_task(coro) for coro in limited_tasks]
+        
+        # Wait for all tasks to complete with proper cancellation handling
+        try:
+            results = await asyncio.gather(*task_objects, return_exceptions=True)
+        except KeyboardInterrupt:
+            # For KeyboardInterrupt, let the tasks complete naturally and return results
+            print("   🛑 KeyboardInterrupt detected, letting parallel processing complete...")
+            # Wait for all tasks to complete (don't cancel them)
+            results = await asyncio.gather(*task_objects, return_exceptions=True)
+        except asyncio.CancelledError:
+            # Cancel all tasks if the operation is cancelled
+            for task in task_objects:
+                if not task.done():
+                    task.cancel()
+            # Wait for cancellation to complete
+            await asyncio.gather(*task_objects, return_exceptions=True)
+            raise
+        except Exception as e:
+            # Cancel all tasks on any other error
+            for task in task_objects:
+                if not task.done():
+                    task.cancel()
+            raise
+        
+        # Process results and create segments
+        segments = []
+        for result_tuple in results:
+            if isinstance(result_tuple, Exception):
+                log_debug(f"❌ Task failed: {result_tuple}", verbose)
+                continue
+            
+            # result_tuple is (transcription_result, group_info)
+            transcription_result, group_info = result_tuple
+            if isinstance(transcription_result, Exception):
+                log_debug(f"❌ Group {group_info['group_idx']+1} failed: {transcription_result}", verbose)
+                continue
+            
+            if transcription_result and hasattr(transcription_result, 'text') and transcription_result.text:
+                # Create speaker segment with accurate transcription
+                segment = SpeakerSegment(
+                    start_time=group_info['group']['start_time'],
+                    end_time=group_info['group']['end_time'],
+                    speaker_id=group_info['speaker_id'],
+                    text=transcription_result.text,
+                    confidence=transcription_result.confidence
+                )
+                segments.append(segment)
+        
+        diarization_logger.success(f"Parallel processing completed: {len(segments)} segments processed")
+        return segments, speaker_mapping
+    
+    async def _get_partial_results(self, grouped_segments: List[Dict], audio_file: str, mode: str, 
+                                 speech_recognizer, verbose: bool = False) -> Tuple[List[SpeakerSegment], Dict[str, str]]:
+        """
+        Get partial results when diarization is interrupted.
+        This method tries to process as many segments as possible before interruption.
+        """
+        print("   🔍 Attempting to get partial results...")
+        
+        # Create speaker mapping
+        speaker_mapping = {}
+        speaker_counter = 0
+        
+        for group in grouped_segments:
+            if group['speaker'] not in speaker_mapping:
+                speaker_counter += 1
+                speaker_mapping[group['speaker']] = f"SPEAKER_{speaker_counter-1:02d}"
+        
+        # Try to process segments one by one (not in parallel) to get partial results
+        segments = []
+        for group_idx, group in enumerate(grouped_segments):
+            try:
+                # Extract audio chunk for this speaker group
+                combined_chunk = self._extract_audio_chunk(
+                    audio_file, group['start_time'], group['end_time']
+                )
+                
+                if combined_chunk is None:
+                    continue
+                
+                # Process this segment
+                speaker_id = speaker_mapping[group['speaker']]
+                result, _ = await self._transcribe_audio_async(
+                    speech_recognizer, combined_chunk, mode, group_idx, verbose
+                )
+                
+                if result and result.text:
+                    segment = SpeakerSegment(
+                        start_time=group['start_time'],
+                        end_time=group['end_time'],
+                        speaker_id=speaker_id,
+                        text=result.text,
+                        confidence=result.confidence
+                    )
+                    segments.append(segment)
+                    print(f"   ✅ Processed segment {group_idx+1}/{len(grouped_segments)}: {result.text[:50]}...")
+                
+            except Exception as e:
+                print(f"   ⚠️ Failed to process segment {group_idx+1}: {e}")
+                continue
+        
+        print(f"   📊 Partial results: {len(segments)} segments processed")
+        return segments, speaker_mapping
+    
+    async def diarize(self, audio_file: str, mode: str, speech_recognizer=None, verbose: bool = False) -> DiarizationResult:
         """
         Perform diarization with enhanced functionality by default.
-        
+
         Args:
             audio_file: Path to audio file
             mode: 'transcription' or 'translation'
             speech_recognizer: SpeechRecognizer instance for transcription
-            
+
         Returns:
             DiarizationResult with speaker-separated transcription
         """
         try:
             # Use the enhanced diarization method directly
-            return self.diarize_with_accurate_transcription(
+            return await self.diarize_with_accurate_transcription(
                 audio_file, mode, speech_recognizer, verbose
             )
         except Exception as e:
@@ -644,7 +840,7 @@ class Diarizer:
                 overall_confidence=0.5
             )
     
-    def diarize_with_accurate_transcription(self, audio_file: str, mode: str, 
+    async def diarize_with_accurate_transcription(self, audio_file: str, mode: str, 
                                           speech_recognizer=None, verbose: bool = False) -> "DiarizationResult":
         """
         CORRECT PIPELINE: Pyannote.audio FIRST, then Groq API per segment.
@@ -727,57 +923,19 @@ class Diarizer:
             
             print(f"   📊 Grouped {len(speaker_segments)} segments into {len(grouped_segments)} groups")
             
-            segments = []
-            speaker_mapping = {}
-            speaker_counter = 0
-            
-            # Process each grouped segment
-            for group_idx, group in enumerate(grouped_segments):
-                log_debug(f"Processing group {group_idx+1}/{len(grouped_segments)}: "
-                      f"{len(group['segments'])} segments, {group['total_duration']:.1f}s, {group['total_size_mb']:.1f}MB", verbose)
-                
-                # Map Pyannote speaker labels to consistent IDs
-                if group['speaker'] not in speaker_mapping:
-                    speaker_counter += 1
-                    speaker_mapping[group['speaker']] = f"SPEAKER_{speaker_counter-1:02d}"
-                
-                speaker_id = speaker_mapping[group['speaker']]
-                
-                # Extract combined audio chunk for this speaker group
-                combined_chunk = self._extract_audio_chunk(
-                    audio_file, group['start_time'], group['end_time']
+            # Process all grouped segments in parallel
+            try:
+                segments, speaker_mapping = await self._process_segments_parallel(
+                    grouped_segments, audio_file, mode, speech_recognizer, verbose
                 )
-                
-                if combined_chunk is None:
-                    print(f"      ⚠️ Skipping group {group_idx+1} - audio extraction failed")
-                    continue
-                
-                # Step 3: Transcribe with Groq API
-                log_debug(f"🎤 Transcribing group {group_idx+1} with Groq API...", verbose)
-                
-                try:
-                    if mode == "translation":
-                        result = speech_recognizer.translate_audio_data(combined_chunk)
-                    else:
-                        result = speech_recognizer.recognize_audio_data(combined_chunk)
-                    
-                    if result and result.text:
-                        # Create speaker segment with accurate transcription
-                        segment = SpeakerSegment(
-                            start_time=group['start_time'],
-                            end_time=group['end_time'],
-                            speaker_id=speaker_id,
-                            text=result.text,
-                            confidence=result.confidence
-                        )
-                        segments.append(segment)
-                        log_debug(f"✅ Group {group_idx+1}: {result.text}", verbose)
-                    else:
-                        log_debug(f"⚠️ Group {group_idx+1}: No text detected", verbose)
-                        
-                except Exception as e:
-                    log_debug(f"❌ Group {group_idx+1} transcription failed: {e}", verbose)
-                    continue
+            except KeyboardInterrupt:
+                # Handle KeyboardInterrupt - let processing complete and return results
+                print("   ⚠️ Diarization interrupted by user, but letting processing complete...")
+                # The parallel processing should have already completed most tasks
+                # Just return what we have
+                segments, speaker_mapping = await self._get_partial_results(
+                    grouped_segments, audio_file, mode, speech_recognizer, verbose
+                )
             
             if not segments:
                 raise ValueError("No segments could be transcribed")
@@ -794,6 +952,22 @@ class Diarizer:
             print(f"   ✅ Diarization completed: {len(segments)} groups, {len(speaker_mapping)} speakers")
             return result
             
+        except KeyboardInterrupt:
+            # If interrupted, try to return partial results if we have any
+            print(f"   ⚠️ Diarization interrupted by user")
+            if 'segments' in locals() and segments:
+                print(f"   📊 Returning partial results: {len(segments)} segments processed")
+                result = DiarizationResult(
+                    segments=segments,
+                    speaker_mapping=speaker_mapping if 'speaker_mapping' in locals() else {},
+                    total_duration=grouped_segments[-1]['end_time'] if grouped_segments else 0.0,
+                    num_speakers=len(speaker_mapping) if 'speaker_mapping' in locals() else 0,
+                    overall_confidence=sum(s.confidence for s in segments) / len(segments) if segments else 0.0
+                )
+                return result
+            else:
+                print(f"   ❌ No partial results available")
+                raise
         except Exception as e:
             print(f"   ❌ Diarization failed: {e}")
             raise

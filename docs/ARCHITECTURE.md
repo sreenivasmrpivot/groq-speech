@@ -1,247 +1,674 @@
-# Groq Speech SDK - CORRECT Architecture
+# Groq Speech SDK - Complete Architecture Analysis
 
-## 🎯 **CORRECT Diarization Pipeline Architecture**
+## 🏗️ **Overall Architecture Overview**
 
-This document describes the **CORRECT** architecture for speaker diarization in the Groq Speech SDK. The previous architecture was fundamentally flawed and has been completely replaced.
+The Groq Speech SDK has **3 main components**:
 
----
+1. **`groq_speech/`** - Core Python SDK (speech processing engine)
+2. **`api/`** - FastAPI backend server (REST + WebSocket APIs)
+3. **`examples/groq-speech-ui/`** - Next.js frontend (React UI)
 
-## ❌ **PREVIOUS FLAWED ARCHITECTURE (REMOVED)**
+## 📁 **File Structure & Purpose**
 
-**The old approach was backwards and unreliable:**
-```
-Audio → Groq API → Full transcription → Pyannote.audio → Text guessing → Poor results
-```
+### **Core SDK (`groq_speech/`)**
+- **`speech_recognizer.py`** - Main orchestrator class, handles all speech processing
+- **`speech_config.py`** - Configuration management for API keys, models, etc.
+- **`speaker_diarization.py`** - Speaker diarization using Pyannote.audio
+- **`vad_service.py`** - Voice Activity Detection
+- **`exceptions.py`** - Custom exception classes
+- **`result_reason.py`** - Result status enums
 
-**Problems with the old approach:**
-1. **Loss of timing relationship** between speakers and text
-2. **Unreliable text splitting** based on guesswork
-3. **Poor speaker attribution** accuracy
-4. **Inefficient processing** - doing the work twice
-5. **Inconsistent results** between microphone and file modes
+### **API Server (`api/`)**
+- **`server.py`** - FastAPI server with REST and WebSocket endpoints
+- **`models/requests.py`** - Pydantic request models
+- **`models/responses.py`** - Pydantic response models
 
----
+### **Frontend (`examples/groq-speech-ui/`)**
+- **`src/app/page.tsx`** - Main page component
+- **`src/components/EnhancedSpeechDemo.tsx`** - Main UI component with all features
+- **`src/components/SpeechRecognition.tsx`** - Basic speech recognition component
+- **`src/lib/groq-api.ts`** - API client for backend communication
+- **`src/lib/audio-recorder.ts`** - Audio recording utilities
+- **`src/types/index.ts`** - TypeScript type definitions
 
-## ✅ **NEW CORRECT ARCHITECTURE**
+## 🔄 **Flow Comparison: CLI vs Web UI**
 
-### **Core Principle: Pyannote.audio FIRST, then Groq API per segment**
+#### **CLI Pattern (Direct Access):**
+- **Layer 2a → Layer 1**: Direct function calls
+- **No network boundaries**: All processing happens in the same process
+- **Simplest path**: CLI calls SDK methods directly
 
-```
-Audio Input → Pyannote.audio → Speaker Detection → Audio Chunking → Groq API per chunk → Perfect Results
-```
+#### **Web UI Pattern (Network Access):**
+- **Layer 3 → Layer 2b**: HTTP requests or WebSocket connections
+- **Layer 2b → Layer 1**: Direct function calls (same as CLI)
+- **Network boundaries**: UI and API run in separate processes
+- **More complex**: Requires serialization/deserialization of data
 
-### **Detailed Pipeline:**
+#### **Key Boundary Crossings:**
+1. **UI → API**: Audio data converted to base64, sent via HTTP/WebSocket
+2. **API → SDK**: Same direct calls as CLI, but with decoded audio data
+3. **SDK → API**: Results returned as Python objects
+4. **API → UI**: Results serialized to JSON, sent via HTTP/WebSocket
 
-#### **Step 1: Speaker Detection (Pyannote.audio)**
-- **Input**: Complete audio file
-- **Process**: Neural network-based speaker segmentation
-- **Output**: Speaker segments with precise timestamps
-- **Result**: "Who spoke when?" with high accuracy
+## **Architecture Diagrams**
 
-#### **Step 2: Audio Chunking**
-- **Input**: Speaker segments from Pyannote.audio
-- **Process**: Extract audio chunks for each speaker segment
-- **Output**: Individual audio files for each speaker's speaking time
-- **Result**: Clean audio segments for each speaker
-
-#### **Step 3: Transcription (Groq API)**
-- **Input**: Individual speaker audio chunks
-- **Process**: Send each chunk to Groq API separately
-- **Output**: Accurate transcription for each speaker segment
-- **Result**: Perfect speaker attribution with accurate text
-
----
-
-## 🏗️ **SYSTEM COMPONENTS**
-
-### **1. SpeakerDiarizer Class**
-```python
-class SpeakerDiarizer:
-    def diarize_with_accurate_transcription(self, audio_file, mode, speech_recognizer):
-        # CORRECT pipeline implementation
-        # 1. Pyannote.audio for speaker detection
-        # 2. Audio chunking for each speaker
-        # 3. Groq API transcription per chunk
-```
-
-**Key Methods:**
-- `diarize_with_accurate_transcription()`: Main CORRECT pipeline
-- `_extract_audio_chunk()`: Extract speaker-specific audio segments
-
-### **2. SpeechRecognizer Integration**
-```python
-class SpeechRecognizer:
-    def recognize_with_correct_diarization(self, audio_file, mode):
-        # Uses SpeakerDiarizer with CORRECT pipeline
-        # Provides unified interface for both file and microphone modes
-```
-
-### **3. Audio Processing Pipeline**
-- **File Mode**: Direct file processing with CORRECT pipeline
-- **Microphone Mode**: 30-second segments for optimal speaker detection
-
----
-
-## 🔄 **DATA FLOW**
-
-### **File Processing Flow:**
-```
-Audio File → Pyannote.audio → 12 speaker segments → 12 Groq API calls → Perfect output
+### **Overall System Architecture**
+```mermaid
+graph TB
+    subgraph "Layer 3: UI Client"
+        UI[groq-speech-ui/<br/>EnhancedSpeechDemo.tsx<br/>SpeechRecognition.tsx]
+    end
+    
+    subgraph "Layer 2b: API Client"
+        API[api/server.py<br/>FastAPI REST + WebSocket]
+    end
+    
+    subgraph "Layer 2a: CLI Client"
+        CLI[speech_demo.py<br/>Command Line Interface]
+    end
+    
+    subgraph "Layer 1: SDK"
+        SDK[groq_speech/<br/>speech_recognizer.py<br/>speaker_diarization.py]
+    end
+    
+    UI -->|HTTP/WebSocket| API
+    CLI -->|Direct Calls| SDK
+    API -->|Direct Calls| SDK
+    
+    style UI fill:#e1f5fe
+    style API fill:#f3e5f5
+    style CLI fill:#f3e5f5
+    style SDK fill:#e8f5e8
 ```
 
-### **Microphone Processing Flow:**
-```
-Microphone → 30s segments → Pyannote.audio → Speaker detection → Audio chunking → Groq API per chunk
-```
-
----
-
-## 🎭 **PYANNOTE.AUDIO INTEGRATION**
-
-### **What Pyannote.audio Provides:**
-- **Speaker Detection**: Identifies who is speaking
-- **Timing Accuracy**: Precise start/end times for each speaker
-- **Speaker Labels**: Consistent speaker identification
-- **High Accuracy**: Neural network-based detection
-
-### **What Pyannote.audio Does NOT Provide:**
-- **Transcription**: Cannot convert speech to text
-- **Speaker-Specific Text**: Cannot split text by speaker
-- **Real-time Processing**: Requires complete audio files
-
-### **Integration Points:**
-1. **Model**: `pyannote/speaker-diarization-3.1`
-2. **Authentication**: HF_TOKEN required
-3. **Input**: Complete audio files (WAV, MP3, M4A)
-4. **Output**: Speaker segments with timestamps
-
----
-
-## 🚀 **PERFORMANCE CHARACTERISTICS**
-
-### **Accuracy Improvements:**
-- **Speaker Attribution**: 100% accurate (no more guessing)
-- **Text Quality**: Perfect transcription per speaker
-- **Timing Precision**: Exact speaker segment boundaries
-- **Consistency**: Same quality for file and microphone modes
-
-### **Processing Efficiency:**
-- **No Duplicate Work**: Each audio segment processed once
-- **Optimized API Calls**: Only necessary audio sent to Groq
-- **Parallel Processing**: Multiple speaker segments can be processed simultaneously
-- **Memory Efficiency**: Audio chunks processed individually
-
----
-
-## 🔧 **CONFIGURATION**
-
-### **Required Environment Variables:**
-```bash
-# Groq API Configuration
-GROQ_API_KEY=your_groq_api_key_here
-GROQ_API_BASE=https://api.groq.com/openai/v1
-
-# HuggingFace Configuration (for Pyannote.audio)
-HF_TOKEN=your_huggingface_token_here
+### **CLI Flow Pattern**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: Run speech_demo.py
+    CLI->>CLI: Process audio input
+    CLI->>SDK: Direct function call
+    SDK->>SDK: Process audio
+    SDK->>CLI: Return result
+    CLI->>User: Display result
 ```
 
-### **Optional Configuration:**
-```bash
-# Audio Processing
-AUDIO_SAMPLE_RATE=16000
-AUDIO_CHANNELS=1
-AUDIO_FORMAT=WAV
-
-# Diarization Settings
-DIARIZATION_MIN_SEGMENT_DURATION=0.5
-DIARIZATION_SPEAKER_SIMILARITY_THRESHOLD=0.75
+### **Web UI Flow Pattern**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select operation
+    UI->>UI: Process audio input
+    UI->>API: HTTP/WebSocket request
+    API->>API: Decode audio data
+    API->>SDK: Direct function call
+    SDK->>SDK: Process audio
+    SDK->>API: Return result
+    API->>UI: HTTP/WebSocket response
+    UI->>User: Display result
 ```
 
----
-
-## 📊 **USAGE EXAMPLES**
-
-### **File Processing:**
-```bash
-python examples/speech_demo.py --file audio.wav --mode transcription
+### **Data Flow Transformations**
+```mermaid
+graph LR
+    subgraph "CLI Path"
+        A1[Audio File/Mic] --> A2[numpy array] --> A3[SDK Processing] --> A4[Console Output]
+    end
+    
+    subgraph "Web UI Path"
+        B1[Audio File/Mic] --> B2[base64] --> B3[HTTP/WebSocket] --> B4[base64 decode] --> B5[numpy array] --> B6[SDK Processing] --> B7[JSON] --> B8[HTTP/WebSocket] --> B9[UI Display]
+    end
+    
+    style A1 fill:#e8f5e8
+    style A4 fill:#e8f5e8
+    style B1 fill:#e1f5fe
+    style B9 fill:#e1f5fe
 ```
 
-### **Microphone Input:**
-```bash
-python examples/speech_demo.py --microphone --mode transcription
+### **1. File Transcription (`--file test1.wav`)**
+
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --file test1.wav
+    CLI->>CLI: process_audio_file()
+    CLI->>SDK: recognizer.process_file(audio_file, enable_diarization=False, is_translation=False)
+    SDK->>SDK: AudioProcessor.process_audio()
+    SDK->>SDK: GroqAPIClient.transcribe()
+    SDK->>SDK: ResponseParser.parse_response()
+    SDK->>CLI: SpeechRecognitionResult
+    CLI->>User: Display transcription result
 ```
 
-### **Basic Mode (No Diarization):**
-```bash
-python examples/speech_demo.py --microphone --mode transcription --basic
+#### **Web UI Flow (Multi-Layer with Network Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "File Transcription" → Upload file
+    UI->>UI: AudioRecorder.processFile() → Convert to base64
+    UI->>API: GroqAPIClient.processAudio() → HTTP POST /api/v1/recognize
+    API->>API: recognize_speech() endpoint
+    API->>API: Decode base64 audio → Convert to numpy array
+    API->>SDK: recognizer.recognize_audio_data() → Same as CLI
+    SDK->>SDK: AudioProcessor.process_audio()
+    SDK->>SDK: GroqAPIClient.transcribe()
+    SDK->>SDK: ResponseParser.parse_response()
+    SDK->>API: SpeechRecognitionResult
+    API->>UI: RecognitionResponse → HTTP response
+    UI->>User: Display transcription result
 ```
 
----
+### **2. File Transcription with Diarization (`--file test1.wav --diarize`)**
 
-## 🎯 **BENEFITS OF THE CORRECT ARCHITECTURE**
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --file test1.wav --diarize
+    CLI->>CLI: process_audio_file(enable_diarization=True)
+    CLI->>SDK: recognizer.process_file(audio_file, enable_diarization=True, is_translation=False)
+    SDK->>SDK: Pyannote.audio → Speaker Detection
+    SDK->>SDK: Audio Chunking → Speaker-specific segments
+    SDK->>SDK: Groq API per segment → Accurate transcription
+    SDK->>CLI: DiarizationResult with speaker segments
+    CLI->>User: Display transcription with speaker attribution
+```
 
-### **1. Perfect Accuracy**
-- **No Text Guessing**: Each speaker gets their exact spoken text
-- **Precise Timing**: Speaker boundaries are exact
-- **Reliable Attribution**: 100% accurate speaker identification
+#### **Web UI Flow (Multi-Layer with Network Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "File Transcription + Diarization" → Upload file
+    UI->>UI: AudioRecorder.processFile() → Convert to base64
+    UI->>API: GroqAPIClient.processAudio(enableDiarization=true) → HTTP POST /api/v1/recognize
+    API->>API: recognize_speech(enable_diarization=True)
+    API->>API: Save to temp file for diarization
+    API->>SDK: recognizer.process_file(temp_path, enable_diarization=True) → Same as CLI
+    SDK->>SDK: Pyannote.audio → Speaker Detection
+    SDK->>SDK: Audio Chunking → Speaker-specific segments
+    SDK->>SDK: Groq API per segment → Accurate transcription
+    SDK->>API: DiarizationResult with speaker segments
+    API->>UI: RecognitionResponse with segments → HTTP response
+    UI->>User: Display transcription with speaker attribution
+```
 
-### **2. Unified Experience**
-- **Consistent Quality**: Same pipeline for file and microphone
-- **Predictable Results**: Always get the same high quality
-- **Easy Debugging**: Clear pipeline with identifiable steps
+### **3. Microphone Single Mode (`--microphone-mode single`)**
 
-### **3. Performance Optimization**
-- **Efficient Processing**: No duplicate work
-- **Scalable Architecture**: Easy to add optimizations
-- **Resource Management**: Better memory and CPU usage
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --microphone-mode single
+    CLI->>CLI: process_microphone_single()
+    CLI->>CLI: PyAudio recording → Convert to numpy array
+    CLI->>SDK: recognizer.recognize_audio_data(audio_data, is_translation=False)
+    SDK->>SDK: AudioProcessor.process_audio()
+    SDK->>SDK: GroqAPIClient.transcribe()
+    SDK->>SDK: ResponseParser.parse_response()
+    SDK->>CLI: SpeechRecognitionResult
+    CLI->>User: Display transcription result
+```
 
-### **4. Maintainability**
-- **Clean Code**: Simple, understandable pipeline
-- **Easy Testing**: Each step can be tested independently
-- **Future-Proof**: Easy to extend and improve
+#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "Single Microphone" → Start recording
+    UI->>UI: AudioRecorder.startRecording() → Web Audio API
+    User->>UI: Stop recording
+    UI->>UI: Convert to base64
+    UI->>API: GroqAPIClient.processAudioWithWebSocket() → WebSocket /ws/recognize
+    API->>API: WebSocket handler /ws/recognize
+    API->>API: Decode base64 audio → Convert to numpy array
+    API->>SDK: recognizer.recognize_audio_data() → Same as CLI
+    SDK->>SDK: AudioProcessor.process_audio()
+    SDK->>SDK: GroqAPIClient.transcribe()
+    SDK->>SDK: ResponseParser.parse_response()
+    SDK->>API: SpeechRecognitionResult
+    API->>UI: WebSocket message → Frontend display
+    UI->>User: Display transcription result
+```
 
----
+### **4. Microphone Single with Diarization (`--microphone-mode single --diarize`)**
 
-## 🔮 **FUTURE ENHANCEMENTS**
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --microphone-mode single --diarize
+    CLI->>CLI: process_microphone_single(enable_diarization=True)
+    CLI->>CLI: PyAudio recording → Save to temp file
+    CLI->>SDK: recognizer.process_file(temp_path, enable_diarization=True)
+    SDK->>SDK: Pyannote.audio → Speaker Detection
+    SDK->>SDK: Audio Chunking → Speaker-specific segments
+    SDK->>SDK: Groq API per segment → Accurate transcription
+    SDK->>CLI: DiarizationResult with speaker segments
+    CLI->>User: Display transcription with speaker attribution
+```
 
-### **Planned Improvements:**
-1. **Real-time Streaming**: Optimize for live microphone input
-2. **Speaker Persistence**: Maintain speaker identity across sessions
-3. **Advanced Chunking**: Intelligent audio segmentation
-4. **Performance Monitoring**: Real-time pipeline metrics
+#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "Single Microphone + Diarization" → Start recording
+    UI->>UI: AudioRecorder.startRecording() → Web Audio API
+    User->>UI: Stop recording
+    UI->>UI: Convert to base64
+    UI->>API: GroqAPIClient.processAudioWithWebSocket(enableDiarization=true) → WebSocket
+    API->>API: WebSocket handler with diarization
+    API->>API: Save to temp file for diarization
+    API->>SDK: recognizer.process_file(temp_path, enable_diarization=True) → Same as CLI
+    SDK->>SDK: Pyannote.audio → Speaker Detection
+    SDK->>SDK: Audio Chunking → Speaker-specific segments
+    SDK->>SDK: Groq API per segment → Accurate transcription
+    SDK->>API: DiarizationResult with speaker segments
+    API->>UI: WebSocket diarization_result message → Frontend display
+    UI->>User: Display transcription with speaker attribution
+```
 
-### **Integration Opportunities:**
-1. **Custom Models**: Support for other speaker detection models
-2. **Multi-language**: Enhanced language support
-3. **Cloud Processing**: Distributed processing capabilities
-4. **API Extensions**: Additional Groq API features
+### **5. Microphone Single Translation (`--microphone-mode single --operation translation`)**
 
----
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --microphone-mode single --operation translation
+    CLI->>CLI: process_microphone_single(operation="translation")
+    CLI->>CLI: PyAudio recording → Convert to numpy array
+    CLI->>SDK: recognizer.recognize_audio_data(audio_data, is_translation=True)
+    SDK->>SDK: AudioProcessor.process_audio()
+    SDK->>SDK: GroqAPIClient.translate()
+    SDK->>SDK: ResponseParser.parse_response()
+    SDK->>CLI: SpeechRecognitionResult with translated text
+    CLI->>User: Display translation result
+```
 
-## 📝 **MIGRATION GUIDE**
+#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "Single Microphone Translation" → Start recording
+    UI->>UI: AudioRecorder.startRecording() → Web Audio API
+    User->>UI: Stop recording
+    UI->>UI: Convert to base64
+    UI->>API: GroqAPIClient.processAudioWithWebSocket(isTranslation=true) → WebSocket
+    API->>API: WebSocket handler with translation
+    API->>API: Decode base64 audio → Convert to numpy array
+    API->>SDK: recognizer.recognize_audio_data(audio_data, is_translation=True) → Same as CLI
+    SDK->>SDK: AudioProcessor.process_audio()
+    SDK->>SDK: GroqAPIClient.translate()
+    SDK->>SDK: ResponseParser.parse_response()
+    SDK->>API: SpeechRecognitionResult with translated text
+    API->>UI: WebSocket message with translated text → Frontend display
+    UI->>User: Display translation result
+```
 
-### **From Old Architecture:**
-1. **Remove text splitting code**: No longer needed
-2. **Update method calls**: Use new CORRECT pipeline methods
-3. **Update configuration**: Ensure HF_TOKEN is properly set
-4. **Test thoroughly**: Verify new pipeline works correctly
+### **6. Microphone Single Translation with Diarization (`--microphone-mode single --operation translation --diarize`)**
 
-### **Breaking Changes:**
-- **Removed**: `split_transcription_by_speaker_time()` function
-- **Removed**: Backwards processing methods
-- **Updated**: All diarization method signatures
-- **Simplified**: Configuration and setup process
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --microphone-mode single --operation translation --diarize
+    CLI->>CLI: process_microphone_single(operation="translation", enable_diarization=True)
+    CLI->>CLI: PyAudio recording → Save to temp file
+    CLI->>SDK: recognizer.process_file(temp_path, enable_diarization=True, is_translation=True)
+    SDK->>SDK: Pyannote.audio → Speaker Detection
+    SDK->>SDK: Audio Chunking → Speaker-specific segments
+    SDK->>SDK: Groq API per segment → Translation
+    SDK->>CLI: DiarizationResult with translated speaker segments
+    CLI->>User: Display translation with speaker attribution
+```
 
----
+#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "Single Microphone Translation + Diarization" → Start recording
+    UI->>UI: AudioRecorder.startRecording() → Web Audio API
+    User->>UI: Stop recording
+    UI->>UI: Convert to base64
+    UI->>API: GroqAPIClient.processAudioWithWebSocket(isTranslation=true, enableDiarization=true) → WebSocket
+    API->>API: WebSocket handler with translation + diarization
+    API->>API: Save to temp file for diarization
+    API->>SDK: recognizer.process_file(temp_path, enable_diarization=True, is_translation=True) → Same as CLI
+    SDK->>SDK: Pyannote.audio → Speaker Detection
+    SDK->>SDK: Audio Chunking → Speaker-specific segments
+    SDK->>SDK: Groq API per segment → Translation
+    SDK->>API: DiarizationResult with translated speaker segments
+    API->>UI: WebSocket diarization_result message with translated segments → Frontend display
+    UI->>User: Display translation with speaker attribution
+```
 
-## ✅ **CONCLUSION**
+### **7. Microphone Continuous Mode (`--microphone-mode continuous`)**
 
-The new CORRECT architecture provides:
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --microphone-mode continuous
+    CLI->>CLI: process_microphone_continuous()
+    CLI->>CLI: PyAudio continuous recording → VAD chunking
+    loop For each chunk
+        CLI->>SDK: recognizer.recognize_audio_data()
+        SDK->>SDK: AudioProcessor.process_audio()
+        SDK->>SDK: GroqAPIClient.transcribe()
+        SDK->>SDK: ResponseParser.parse_response()
+        SDK->>CLI: SpeechRecognitionResult
+        CLI->>User: Stream results to console
+    end
+    User->>CLI: Ctrl+C to stop
+    CLI->>User: Continuous processing completed
+```
 
-1. **Perfect Accuracy**: 100% reliable speaker attribution
-2. **Unified Experience**: Consistent quality across all modes
-3. **Better Performance**: Efficient, optimized processing
-4. **Maintainable Code**: Clean, understandable architecture
-5. **Future-Proof**: Easy to extend and improve
+#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "Continuous Microphone" → Start recording
+    UI->>UI: AudioRecorder.startContinuousRecording() → Web Audio API with chunking
+    loop For each chunk
+        UI->>API: GroqAPIClient.sendAudioData() → WebSocket
+        API->>API: WebSocket handler processes each chunk
+        API->>SDK: recognizer.recognize_audio_data() → Same as CLI
+        SDK->>SDK: AudioProcessor.process_audio()
+        SDK->>SDK: GroqAPIClient.transcribe()
+        SDK->>SDK: ResponseParser.parse_response()
+        SDK->>API: SpeechRecognitionResult
+        API->>UI: WebSocket messages for each result → Frontend display
+        UI->>User: Display transcription result
+    end
+    User->>UI: Stop recording
+    UI->>User: Continuous processing completed
+```
 
-**The flawed backwards architecture has been completely eliminated and replaced with a proper, reliable system that delivers exactly what users expect: perfect speaker diarization with accurate transcriptions.**
+### **8. Microphone Continuous with Diarization (`--microphone-mode continuous --diarize`)**
+
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --microphone-mode continuous --diarize
+    CLI->>CLI: process_microphone_continuous(enable_diarization=True)
+    CLI->>CLI: PyAudio continuous recording → VAD chunking
+    loop For each chunk
+        CLI->>CLI: Save to temp file
+        CLI->>SDK: recognizer.process_file(enable_diarization=True)
+        SDK->>SDK: Pyannote.audio → Speaker Detection
+        SDK->>SDK: Audio Chunking → Speaker-specific segments
+        SDK->>SDK: Groq API per segment → Accurate transcription
+        SDK->>CLI: DiarizationResult with speaker segments
+        CLI->>User: Stream diarization results to console
+    end
+    User->>CLI: Ctrl+C to stop
+    CLI->>User: Continuous diarization processing completed
+```
+
+#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "Continuous Microphone + Diarization" → Start recording
+    UI->>UI: AudioRecorder.startContinuousRecording() → Web Audio API with chunking
+    loop For each chunk
+        UI->>API: GroqAPIClient.sendAudioData(enableDiarization=true) → WebSocket
+        API->>API: WebSocket handler with diarization
+        API->>SDK: recognizer.process_file(temp_path, enable_diarization=True) → Same as CLI
+        SDK->>SDK: Pyannote.audio → Speaker Detection
+        SDK->>SDK: Audio Chunking → Speaker-specific segments
+        SDK->>SDK: Groq API per segment → Accurate transcription
+        SDK->>API: DiarizationResult with speaker segments
+        API->>UI: WebSocket diarization_result messages → Frontend display
+        UI->>User: Display diarization results
+    end
+    User->>UI: Stop recording
+    UI->>User: Continuous diarization processing completed
+```
+
+### **9. Microphone Continuous Translation (`--microphone-mode continuous --operation translation`)**
+
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --microphone-mode continuous --operation translation
+    CLI->>CLI: process_microphone_continuous(operation="translation")
+    CLI->>CLI: PyAudio continuous recording → VAD chunking
+    loop For each chunk
+        CLI->>SDK: recognizer.recognize_audio_data(is_translation=True)
+        SDK->>SDK: AudioProcessor.process_audio()
+        SDK->>SDK: GroqAPIClient.translate()
+        SDK->>SDK: ResponseParser.parse_response()
+        SDK->>CLI: SpeechRecognitionResult with translated text
+        CLI->>User: Stream translated results to console
+    end
+    User->>CLI: Ctrl+C to stop
+    CLI->>User: Continuous translation processing completed
+```
+
+#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "Continuous Microphone Translation" → Start recording
+    UI->>UI: AudioRecorder.startContinuousRecording() → Web Audio API with chunking
+    loop For each chunk
+        UI->>API: GroqAPIClient.sendAudioData(isTranslation=true) → WebSocket
+        API->>API: WebSocket handler with translation
+        API->>SDK: recognizer.recognize_audio_data(is_translation=True) → Same as CLI
+        SDK->>SDK: AudioProcessor.process_audio()
+        SDK->>SDK: GroqAPIClient.translate()
+        SDK->>SDK: ResponseParser.parse_response()
+        SDK->>API: SpeechRecognitionResult with translated text
+        API->>UI: WebSocket messages with translated text → Frontend display
+        UI->>User: Display translation result
+    end
+    User->>UI: Stop recording
+    UI->>User: Continuous translation processing completed
+```
+
+### **10. Microphone Continuous Translation with Diarization (`--microphone-mode continuous --operation translation --diarize`)**
+
+#### **CLI Flow (Direct Layer Access):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Layer 2a: CLI Client
+    participant SDK as Layer 1: SDK
+    
+    User->>CLI: python speech_demo.py --microphone-mode continuous --operation translation --diarize
+    CLI->>CLI: process_microphone_continuous(operation="translation", enable_diarization=True)
+    CLI->>CLI: PyAudio continuous recording → VAD chunking
+    loop For each chunk
+        CLI->>CLI: Save to temp file
+        CLI->>SDK: recognizer.process_file(enable_diarization=True, is_translation=True)
+        SDK->>SDK: Pyannote.audio → Speaker Detection
+        SDK->>SDK: Audio Chunking → Speaker-specific segments
+        SDK->>SDK: Groq API per segment → Translation
+        SDK->>CLI: DiarizationResult with translated speaker segments
+        CLI->>User: Stream translated diarization results to console
+    end
+    User->>CLI: Ctrl+C to stop
+    CLI->>User: Continuous translation + diarization processing completed
+```
+
+#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Layer 3: UI Client
+    participant API as Layer 2b: API Client
+    participant SDK as Layer 1: SDK
+    
+    User->>UI: Select "Continuous Microphone Translation + Diarization" → Start recording
+    UI->>UI: AudioRecorder.startContinuousRecording() → Web Audio API with chunking
+    loop For each chunk
+        UI->>API: GroqAPIClient.sendAudioData(isTranslation=true, enableDiarization=true) → WebSocket
+        API->>API: WebSocket handler with translation + diarization
+        API->>SDK: recognizer.process_file(temp_path, enable_diarization=True, is_translation=True) → Same as CLI
+        SDK->>SDK: Pyannote.audio → Speaker Detection
+        SDK->>SDK: Audio Chunking → Speaker-specific segments
+        SDK->>SDK: Groq API per segment → Translation
+        SDK->>API: DiarizationResult with translated speaker segments
+        API->>UI: WebSocket diarization_result messages with translated segments → Frontend display
+        UI->>User: Display translation with speaker attribution
+    end
+    User->>UI: Stop recording
+    UI->>User: Continuous translation + diarization processing completed
+```
+
+## 🔧 **Key Technical Differences**
+
+### **Audio Processing:**
+- **CLI**: Uses PyAudio for microphone input, direct numpy array processing
+- **Web UI**: Uses Web Audio API, converts to base64 for transmission
+
+### **API Communication:**
+- **CLI**: Direct function calls to `groq_speech` module
+- **Web UI**: HTTP REST API + WebSocket for real-time communication
+
+### **Diarization Handling:**
+- **CLI**: Direct file processing with `process_file()`
+- **Web UI**: Same logic but through API endpoints
+
+### **Translation Mode:**
+- **CLI**: Sets `speech_config.enable_translation = True`
+- **Web UI**: Passes `is_translation` parameter through API
+
+## 🚨 **Potential Issues to Check**
+
+1. **Audio Format Consistency**: CLI uses 16kHz, ensure Web UI matches
+2. **Base64 Encoding**: Verify audio data is properly encoded/decoded
+3. **WebSocket State Management**: Check connection handling
+4. **Diarization Temp Files**: Ensure proper cleanup in API server
+5. **Error Handling**: Verify consistent error responses
+6. **Translation Configuration**: Ensure translation mode is properly set
+
+## 📊 **Performance Considerations**
+
+- **CLI**: Direct processing, fastest
+- **Web UI**: Network overhead, but same core processing
+- **Diarization**: Most expensive operation, requires temp files
+- **Continuous Mode**: Real-time processing, WebSocket for low latency
+
+## 🎯 **Layer Transition Summary**
+
+### **Understanding the 3-Layer Architecture with Parallel Client Interfaces**
+
+The Groq Speech SDK uses a **3-layer architecture** with **parallel client interfaces** where each layer has specific responsibilities:
+
+#### **Layer 1: SDK (`groq_speech/`)**
+- **Purpose**: Core speech processing engine
+- **Key Files**: `speech_recognizer.py`, `speaker_diarization.py`, `speech_config.py`
+- **Responsibilities**: Audio processing, API calls to Groq, result parsing
+- **Interface**: Python functions and classes
+
+#### **Layer 2a: CLI Client (`speech_demo.py`)**
+- **Purpose**: Command-line interface for testing and demonstration
+- **Key Files**: `examples/speech_demo.py`
+- **Responsibilities**: User interaction, argument parsing, audio input handling
+- **Interface**: Direct function calls to Layer 1
+
+#### **Layer 2b: API Client (`api/`)**
+- **Purpose**: Web API server that exposes SDK functionality
+- **Key Files**: `api/server.py`
+- **Responsibilities**: HTTP/WebSocket endpoints, request/response handling, data serialization
+- **Interface**: HTTP REST API + WebSocket to Layer 3, direct calls to Layer 1
+
+#### **Layer 3: UI Client (`groq-speech-ui/`)**
+- **Purpose**: Web-based user interface
+- **Key Files**: `EnhancedSpeechDemo.tsx`, `SpeechRecognition.tsx`, `groq-api.ts`
+- **Responsibilities**: User interface, audio recording, API communication
+- **Interface**: HTTP requests and WebSocket connections to Layer 2b
+
+
+### **Data Flow Transformations**
+
+#### **Audio Data Flow:**
+1. **CLI**: File/Microphone → numpy array → SDK
+2. **Web UI**: File/Microphone → base64 → HTTP → base64 decode → numpy array → SDK
+
+#### **Result Data Flow:**
+1. **CLI**: SDK result → Console output
+2. **Web UI**: SDK result → JSON serialization → HTTP response → JSON parsing → UI display
+
+### **Key Insights**
+
+1. **Same Core Logic**: Both CLI and Web UI use identical SDK processing
+2. **Different Interfaces**: CLI uses direct calls, Web UI uses network protocols
+3. **Data Serialization**: Web UI requires base64 encoding/decoding for audio data
+4. **Error Handling**: Web UI needs additional error handling for network issues
+5. **Performance**: CLI is faster (no network overhead), Web UI is more accessible
+
+This architecture ensures the Web UI provides the same functionality as the CLI but through a web interface with proper separation of concerns.

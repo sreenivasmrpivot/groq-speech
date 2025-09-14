@@ -123,7 +123,7 @@ def validate_environment(enable_diarization: bool = False):
     return True
 
 
-def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = True):
+async def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = True):
     """
     Process audio file - NOW ULTRA SIMPLE!
     
@@ -148,7 +148,7 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
     # ULTRA SIMPLE API CALLS - SDK handles EVERYTHING internally!
     try:
         is_translation = (mode == "translation")
-        result = recognizer.process_file(audio_file, enable_diarization=enable_diarization, is_translation=is_translation)
+        result = await recognizer.process_file(audio_file, enable_diarization=enable_diarization, is_translation=is_translation)
         return result
 
     except Exception as e:
@@ -156,7 +156,7 @@ def process_audio_file(audio_file: str, mode: str, recognizer: SpeechRecognizer,
         return None
 
 
-def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False):
+async def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False):
     """Simple single-shot microphone recording - SDK handles complexity internally."""
     print(f"\n🎤 Single Microphone {mode.title()}")
     print("=" * 50)
@@ -229,7 +229,13 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
                 
                 try:
                     is_translation = (mode == "translation")
-                    result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+                    # Process with diarization - let it complete even if interrupted
+                    try:
+                        result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+                    except KeyboardInterrupt:
+                        # If interrupted during processing, let it complete and show results
+                        print("\n🛑 Processing interrupted by user, but letting diarization complete...")
+                        result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
                 finally:
                     # Clean up temporary file
                     try:
@@ -237,9 +243,9 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
                     except:
                         pass
             else:
-                # For non-diarization, use direct audio data processing
+                # For non-diarization, use chunked audio data processing
                 is_translation = (mode == "translation")
-                result = recognizer.recognize_audio_data(audio_data, RATE, is_translation=is_translation)
+                result = recognizer.recognize_audio_data_chunked(audio_data, RATE, is_translation=is_translation)
 
             if result:
                 if hasattr(result, "text") and result.text:
@@ -270,7 +276,7 @@ def process_microphone_single(mode: str, recognizer: SpeechRecognizer, enable_di
         return None
 
 
-def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False):
+async def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enable_diarization: bool = False):
     """Continuous microphone transcription - SDK handles VAD and chunking internally."""
     print(f"\n🎤 Continuous Microphone {mode.title()}")
     print("=" * 50)
@@ -353,7 +359,8 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
                         
                         try:
                             is_translation = (mode == "translation")
-                            result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+                            # Process with diarization - let it complete even if interrupted
+                            result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
                         finally:
                             # Clean up temporary file
                             try:
@@ -361,9 +368,9 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
                             except:
                                 pass
                     else:
-                        # For non-diarization, use direct audio data processing
+                        # For non-diarization, use chunked audio data processing
                         is_translation = (mode == "translation")
-                        result = recognizer.recognize_audio_data(trimmed_audio, RATE, is_translation=is_translation)
+                        result = recognizer.recognize_audio_data_chunked(trimmed_audio, RATE, is_translation=is_translation)
 
                     if result:
                         if hasattr(result, "text") and result.text:
@@ -405,7 +412,13 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
                     
                     try:
                         is_translation = (mode == "translation")
-                        result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+                        # Process with diarization - let it complete even if interrupted
+                        try:
+                            result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+                        except KeyboardInterrupt:
+                            # If interrupted during processing, let it complete and show results
+                            print("\n🛑 Processing interrupted by user, but letting diarization complete...")
+                            result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
                     finally:
                         # Clean up temporary file
                         try:
@@ -452,7 +465,7 @@ def process_microphone_continuous(mode: str, recognizer: SpeechRecognizer, enabl
         return None
 
 
-def main():
+async def main():
     """Main function - NOW ULTRA SIMPLE!"""
     parser = argparse.ArgumentParser(
         description="Clean Speech Demo - Leveraging SDK's Internal Capabilities",
@@ -539,12 +552,12 @@ EXAMPLES:
     # Process based on arguments - SIMPLE API CALLS!
     try:
         if args.file:
-            result = process_audio_file(args.file, args.operation, recognizer, args.diarize)
+            result = await process_audio_file(args.file, args.operation, recognizer, args.diarize)
         else:  # microphone
             if args.microphone_mode == "single":
-                result = process_microphone_single(args.operation, recognizer, args.diarize)
+                result = await process_microphone_single(args.operation, recognizer, args.diarize)
             else:  # continuous
-                result = process_microphone_continuous(args.operation, recognizer, args.diarize)
+                result = await process_microphone_continuous(args.operation, recognizer, args.diarize)
 
         if result:
             print(f"\n✅ Processing completed successfully!")
@@ -566,7 +579,23 @@ EXAMPLES:
             sys.exit(1)
 
     except KeyboardInterrupt:
+        # Only exit if we're not in the middle of processing recorded audio
+        # The microphone functions handle their own KeyboardInterrupt during recording
         print(f"\n🛑 Processing interrupted by user")
+        # Don't exit immediately - let the microphone functions handle their own KeyboardInterrupt
+        # and show results if processing was completed
+        if result:
+            print(f"\n✅ Processing completed successfully!")
+            if hasattr(result, "segments"):
+                print(f"🎭 Speakers: {result.num_speakers}")
+                print(f"📊 Speaker Segment Groups: {len(result.segments)}")
+                for i, segment in enumerate(result.segments):
+                    speaker = segment.speaker_id
+                    text = getattr(segment, "text", "") or "[No text]"
+                    print(f"\n🎤 {speaker}:")
+                    print(f"      {text}")
+            elif hasattr(result, "text"):
+                print(f"📝 Text: {result.text}")
         sys.exit(0)
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
@@ -574,4 +603,12 @@ EXAMPLES:
 
 
 if __name__ == "__main__":
-    exit(main())
+    import asyncio
+    try:
+        exit(asyncio.run(main()))
+    except KeyboardInterrupt:
+        print(f"\n🛑 Processing interrupted by user")
+        exit(0)
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        exit(1)

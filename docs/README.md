@@ -5,14 +5,12 @@ Welcome to the Groq Speech SDK documentation! This index will help you find the 
 ## 📚 **Documentation Structure**
 
 ### **🏠 Project Overview**
-- **[README.md](../README.md)** - Main project overview, quick start, and basic usage
-
-### **📖 User Guides**
-- **[COMPLETE_USAGE_GUIDE.md](COMPLETE_USAGE_GUIDE.md)** - Comprehensive guide to all features and modes
-- **[examples/README.md](../examples/README.md)** - Examples and demo applications
+- **[README.md](../README.md)** - Main project overview, quick start, and comprehensive usage guide
 
 ### **🏗️ Technical Documentation**
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture, data flow, and optimization features
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete system architecture with Mermaid diagrams
+- **[CODE_ANALYSIS.md](../CODE_ANALYSIS.md)** - Detailed code analysis and implementation patterns
+- **[API_REFERENCE.md](../groq_speech/API_REFERENCE.md)** - Complete API reference
 
 ### **🌐 Web Interface**
 - **[examples/groq-speech-ui/README.md](../examples/groq-speech-ui/README.md)** - Web UI documentation
@@ -25,14 +23,14 @@ Welcome to the Groq Speech SDK documentation! This index will help you find the 
 ## 🎯 **Quick Navigation**
 
 ### **For New Users:**
-1. Start with **[README.md](../README.md)** for project overview
-2. Read **[COMPLETE_USAGE_GUIDE.md](COMPLETE_USAGE_GUIDE.md)** for comprehensive usage
-3. Check **[examples/README.md](../examples/README.md)** for examples
+1. Start with **[README.md](../README.md)** for project overview and comprehensive usage
+2. Check **[examples/groq-speech-ui/README.md](../examples/groq-speech-ui/README.md)** for web interface
+3. Review **[API_REFERENCE.md](../groq_speech/API_REFERENCE.md)** for detailed API usage
 
 ### **For Developers:**
-1. Review **[ARCHITECTURE.md](ARCHITECTURE.md)** for system design
-2. Check **[examples/README.md](../examples/README.md)** for implementation examples
-3. Read **[CONTRIBUTING.md](../CONTRIBUTING.md)** for contribution guidelines
+1. Review **[ARCHITECTURE.md](ARCHITECTURE.md)** for complete system architecture
+2. Read **[CODE_ANALYSIS.md](../CODE_ANALYSIS.md)** for implementation details
+3. Check **[CONTRIBUTING.md](../CONTRIBUTING.md)** for contribution guidelines
 
 ### **For Web UI Users:**
 1. Check **[examples/groq-speech-ui/README.md](../examples/groq-speech-ui/README.md)** for web interface
@@ -42,10 +40,10 @@ Welcome to the Groq Speech SDK documentation! This index will help you find the 
 
 | Document | Purpose | Audience | Content |
 |----------|---------|----------|---------|
-| **README.md** | Project overview | All users | Quick start, features, installation |
-| **COMPLETE_USAGE_GUIDE.md** | Complete feature guide | End users | All modes, examples, troubleshooting |
-| **ARCHITECTURE.md** | Technical architecture | Developers | System design, data flow, optimization |
-| **examples/README.md** | Examples and demos | End users | Demo applications, usage patterns |
+| **README.md** | Project overview | All users | Quick start, features, comprehensive usage |
+| **ARCHITECTURE.md** | Technical architecture | Developers | System design, data flow, Mermaid diagrams |
+| **CODE_ANALYSIS.md** | Code implementation | Developers | Detailed code analysis, patterns |
+| **API_REFERENCE.md** | API documentation | Developers | Complete API reference, methods |
 | **groq-speech-ui/README.md** | Web interface | Web users | UI features, usage instructions |
 | **BACKEND_SETUP.md** | Backend setup | Developers | Server configuration, deployment |
 | **CHANGELOG.md** | Version history | All users | Changes, updates, releases |

@@ -13,15 +13,27 @@
 
 ### Constructor
 ```python
-SpeechRecognizer(api_key: str, enable_diarization: bool = False, translation_target_language: str = "en", audio_device_id: Optional[int] = None, sample_rate: int = 16000)
+SpeechRecognizer(
+    speech_config: Optional[SpeechConfig] = None,
+    api_key: Optional[str] = None,
+    enable_diarization: bool = False,
+    translation_target_language: str = "en",
+    sample_rate: int = 16000,
+    api_client: Optional[IAPIClient] = None,
+    audio_processor: Optional[IAudioProcessor] = None,
+    diarization_service: Optional[IDiarizationService] = None
+)
 ```
 
 **Parameters**:
-- `api_key`: Groq API key for authentication
+- `speech_config`: Speech configuration object (optional)
+- `api_key`: Groq API key for authentication (optional)
 - `enable_diarization`: Whether to enable speaker diarization (default: False)
 - `translation_target_language`: Target language for translation (default: "en")
-- `audio_device_id`: Audio device ID for microphone input (optional)
 - `sample_rate`: Audio sample rate in Hz (default: 16000)
+- `api_client`: API client implementation (for testing)
+- `audio_processor`: Audio processor implementation (for testing)
+- `diarization_service`: Diarization service implementation (for testing)
 
 ### Core Methods
 
@@ -52,6 +64,30 @@ def translate_audio_data(self, audio_data: np.ndarray, sample_rate: int = 16000)
 ```python
 def recognize_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]
 ```
+
+**Purpose**: Process audio file for recognition
+**Parameters**:
+- `audio_file`: Path to audio file
+- `enable_diarization`: Whether to enable speaker diarization (default: True)
+**Returns**: `SpeechRecognitionResult` or `DiarizationResult` with recognition data
+**Usage**: Primary method for file-based processing
+
+#### translate_file()
+```python
+def translate_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]
+```
+
+**Purpose**: Process audio file for translation
+**Parameters**:
+- `audio_file`: Path to audio file
+- `enable_diarization`: Whether to enable speaker diarization (default: True)
+**Returns**: `SpeechRecognitionResult` or `DiarizationResult` with translated text
+**Usage**: Translate audio files to target language
+
+#### process_file()
+```python
+async def process_file(self, audio_file: str, enable_diarization: bool = True, is_translation: bool = False) -> Union[SpeechRecognitionResult, DiarizationResult]
+```
 **Purpose**: Recognize speech from audio file
 **Parameters**:
 - `audio_file`: Path to audio file
@@ -59,9 +95,20 @@ def recognize_file(self, audio_file: str, enable_diarization: bool = True) -> Un
 **Returns**: `SpeechRecognitionResult` or `DiarizationResult` with recognition data
 **Usage**: Process audio files with optional diarization
 
+#### recognize_file()
+```python
+async def recognize_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]
+```
+**Purpose**: Recognize speech from audio file (convenience method)
+**Parameters**:
+- `audio_file`: Path to audio file
+- `enable_diarization`: Whether to enable speaker diarization (default: True)
+**Returns**: `SpeechRecognitionResult` or `DiarizationResult` with recognition data
+**Usage**: Convenience method for basic recognition
+
 #### translate_file()
 ```python
-def translate_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]
+async def translate_file(self, audio_file: str, enable_diarization: bool = True) -> Union[SpeechRecognitionResult, DiarizationResult]
 ```
 **Purpose**: Translate audio file to target language
 **Parameters**:
