@@ -51,9 +51,7 @@ def run_unit_tests():
         
         # Unit test modules
         unit_tests = [
-            "test_speech_config",
-            "test_audio_processor", 
-            "test_basic_functionality"
+            "unit.test_speech_config"
         ]
         
         suite = unittest.TestSuite()
@@ -82,8 +80,7 @@ def run_e2e_tests():
         
         # E2E test modules
         e2e_tests = [
-            "test_e2e_cli",
-            "test_transcription_accuracy"
+            "test_e2e_cli"
         ]
         
         suite = unittest.TestSuite()

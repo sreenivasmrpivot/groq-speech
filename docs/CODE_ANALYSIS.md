@@ -28,41 +28,39 @@ if args.operation == "translation":
 
 ### **2. `api/server.py` (Backend API)**
 
-**Purpose**: FastAPI server that exposes CLI functionality via REST and WebSocket
+**Purpose**: FastAPI server that exposes CLI functionality via REST API only
 
 **Key Endpoints**:
-- `POST /api/v1/recognize` - File transcription (REST)
-- `POST /api/v1/translate` - File translation (REST)
-- `WebSocket /ws/recognize` - Real-time microphone processing
+- `POST /api/v1/recognize` - File transcription (base64 audio data)
+- `POST /api/v1/translate` - File translation (base64 audio data)
+- `POST /api/v1/recognize-microphone` - Single microphone processing (Float32Array JSON)
+- `POST /api/v1/recognize-microphone-continuous` - Continuous microphone processing (Float32Array JSON)
 
 **Critical Functions**:
 ```python
+# File processing (base64 audio data)
 async def recognize_speech(request: RecognitionRequest):
-    # Setup config - EXACTLY like CLI
-    speech_config = get_speech_config(
-        model=request.model,
-        is_translation=False,
-        target_language=request.target_language,
-    )
+    # Decode base64 audio data
+    audio_bytes = base64.b64decode(request.audio_data)
+    audio_array_float, sample_rate = sf.read(io.BytesIO(audio_bytes))
     
-    # Create recognizer - EXACTLY like CLI
-    recognizer = SpeechRecognizer(speech_config)
-    
-    # Process based on diarization requirement
+    # Process with SDK - EXACTLY like CLI
     if request.enable_diarization:
-        # Save to temp file and use process_file (like CLI)
         result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=False)
     else:
-        # Direct audio data processing (like CLI)
-        result = recognizer.recognize_audio_data(audio_array_float, is_translation=False)
-```
+        result = recognizer.recognize_audio_data(audio_array_float, sample_rate, is_translation=False)
 
-**WebSocket Handler**:
-```python
-async def websocket_endpoint(websocket: WebSocket):
-    # Handles real-time audio streaming
-    # Processes audio chunks similar to CLI continuous mode
-    # Sends results back via WebSocket messages
+# Microphone processing (Float32Array JSON)
+async def recognize_microphone_single(request: dict):
+    # Extract Float32Array from JSON
+    audio_data = request.get("audio_data")  # Raw float32 array as list
+    audio_array = np.array(audio_data, dtype=np.float32)
+    
+    # Process with SDK - EXACTLY like CLI
+    if enable_diarization:
+        result = recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
+    else:
+        result = recognizer.recognize_audio_data_chunked(audio_array, sample_rate, is_translation=is_translation)
 ```
 
 ### **3. `examples/groq-speech-ui/src/components/EnhancedSpeechDemo.tsx` (Frontend UI)**
@@ -81,16 +79,16 @@ const [diarizationResults, setDiarizationResults] = useState<DiarizationResult[]
 **Command Configuration**:
 ```typescript
 const COMMAND_CONFIGS: CommandConfig[] = [
-    // File-based commands (REST API)
-    { id: 'file_transcription', endpoint: 'rest', diarization: false },
-    { id: 'file_transcription_diarize', endpoint: 'rest', diarization: true },
-    { id: 'file_translation', endpoint: 'rest', diarization: false },
-    { id: 'file_translation_diarize', endpoint: 'rest', diarization: true },
+    // File-based commands (REST API with base64)
+    { id: 'file_transcription', diarization: false },
+    { id: 'file_transcription_diarize', diarization: true },
+    { id: 'file_translation', diarization: false },
+    { id: 'file_translation_diarize', diarization: true },
     
-    // Microphone commands (WebSocket)
-    { id: 'microphone_single', endpoint: 'websocket', diarization: false },
-    { id: 'microphone_single_diarize', endpoint: 'websocket', diarization: true },
-    { id: 'microphone_continuous', endpoint: 'websocket', diarization: false },
+    // Microphone commands (REST API with Float32Array)
+    { id: 'microphone_single', diarization: false },
+    { id: 'microphone_single_diarize', diarization: true },
+    { id: 'microphone_continuous', diarization: false },
     // ... etc
 ];
 ```
@@ -259,12 +257,13 @@ speech_config.enable_translation = True
 
 ### **1. Audio Format Issues**
 - **Check**: Sample rate consistency (16kHz)
-- **Check**: Audio encoding/decoding
-- **Check**: Base64 conversion accuracy
+- **Check**: File processing: Base64 encoding/decoding accuracy
+- **Check**: Microphone processing: Float32Array to JSON array conversion
+- **Check**: Audio format consistency between CLI and Web UI
 
-### **2. WebSocket State Management**
-- **Check**: Connection state handling
-- **Check**: Message parsing
+### **2. REST API State Management**
+- **Check**: Request/response handling
+- **Check**: JSON parsing
 - **Check**: Error handling
 
 ### **3. Diarization Temp Files**
@@ -298,5 +297,51 @@ curl -X POST http://localhost:8000/api/v1/recognize -H "Content-Type: applicatio
 cd examples/groq-speech-ui
 npm run dev
 ```
+
+## 🎵 **Audio Format Handling Across Layers**
+
+### **CLI Layer (speech_demo.py)**
+```python
+# File processing
+result = recognizer.process_file(audio_file, enable_diarization=enable_diarization, is_translation=is_translation)
+
+# Microphone processing
+audio_data = np.frombuffer(b"".join(all_frames), dtype=np.float32)  # Float32 numpy array
+result = recognizer.recognize_audio_data(audio_data, RATE, is_translation=is_translation)
+```
+
+### **API Layer (server.py)**
+```python
+# File processing (base64 → numpy)
+audio_bytes = base64.b64decode(request.audio_data)
+audio_array_float, sample_rate = sf.read(io.BytesIO(audio_bytes))  # WAV format
+result = recognizer.recognize_audio_data(audio_array_float, sample_rate, is_translation=False)
+
+# Microphone processing (JSON array → numpy)
+audio_data = request.get("audio_data")  # Float32Array as JSON list
+audio_array = np.array(audio_data, dtype=np.float32)  # Convert to numpy
+result = recognizer.recognize_audio_data_chunked(audio_array, sample_rate, is_translation=is_translation)
+```
+
+### **Frontend Layer (groq-speech-ui)**
+```typescript
+// File processing (Blob → base64)
+const audioBuffer = await audioContext.decodeAudioData(audioData);
+const channelData = audioBuffer.getChannelData(0);
+const base64Audio = btoa(String.fromCharCode(...new Uint8Array(audioBuffer)));
+
+// Microphone processing (Float32Array → JSON array)
+const audioArray = Array.from(pcmData);  // Convert Float32Array to regular array
+const response = await fetch('/api/v1/recognize-microphone', {
+    method: 'POST',
+    body: JSON.stringify({ audio_data: audioArray, sample_rate: 16000 })
+});
+```
+
+### **Key Format Conversions**:
+1. **CLI → SDK**: Direct numpy array (Float32)
+2. **Frontend → API (File)**: Blob → base64 → WAV → numpy array
+3. **Frontend → API (Mic)**: Float32Array → JSON array → numpy array
+4. **API → SDK**: Same numpy array format as CLI
 
 This analysis should help you identify any issues in the implementation and understand how each component works together.

@@ -5,7 +5,7 @@
 The Groq Speech SDK has **3 main components**:
 
 1. **`groq_speech/`** - Core Python SDK (speech processing engine)
-2. **`api/`** - FastAPI backend server (REST + WebSocket APIs)
+2. **`api/`** - FastAPI backend server (REST API only)
 3. **`examples/groq-speech-ui/`** - Next.js frontend (React UI)
 
 ## 📁 **File Structure & Purpose**
@@ -19,16 +19,22 @@ The Groq Speech SDK has **3 main components**:
 - **`result_reason.py`** - Result status enums
 
 ### **API Server (`api/`)**
-- **`server.py`** - FastAPI server with REST and WebSocket endpoints
+- **`server.py`** - FastAPI server with REST API endpoints only
 - **`models/requests.py`** - Pydantic request models
 - **`models/responses.py`** - Pydantic response models
 
 ### **Frontend (`examples/groq-speech-ui/`)**
 - **`src/app/page.tsx`** - Main page component
 - **`src/components/EnhancedSpeechDemo.tsx`** - Main UI component with all features
-- **`src/components/SpeechRecognition.tsx`** - Basic speech recognition component
-- **`src/lib/groq-api.ts`** - API client for backend communication
+- **`src/components/PerformanceMetrics.tsx`** - Performance metrics visualization
+- **`src/lib/groq-api.ts`** - REST API client for backend communication
 - **`src/lib/audio-recorder.ts`** - Audio recording utilities
+- **`src/lib/continuous-audio-recorder.ts`** - VAD-based continuous recording
+- **`src/lib/vad-service.ts`** - Voice Activity Detection service
+- **`src/lib/audio-converter.ts`** - Audio format conversion utilities
+- **`src/lib/optimized-audio-converter.ts`** - Optimized audio conversion
+- **`src/lib/optimized-audio-recorder.ts`** - Optimized audio recording
+- **`src/lib/frontend-logger.ts`** - Frontend logging utilities
 - **`src/types/index.ts`** - TypeScript type definitions
 
 ## 🔄 **Flow Comparison: CLI vs Web UI**
@@ -39,16 +45,18 @@ The Groq Speech SDK has **3 main components**:
 - **Simplest path**: CLI calls SDK methods directly
 
 #### **Web UI Pattern (Network Access):**
-- **Layer 3 → Layer 2b**: HTTP requests or WebSocket connections
+- **Layer 3 → Layer 2b**: HTTP REST requests only
 - **Layer 2b → Layer 1**: Direct function calls (same as CLI)
 - **Network boundaries**: UI and API run in separate processes
 - **More complex**: Requires serialization/deserialization of data
 
 #### **Key Boundary Crossings:**
-1. **UI → API**: Audio data converted to base64, sent via HTTP/WebSocket
+1. **UI → API**: 
+   - File processing: Audio converted to base64, sent via HTTP REST
+   - Microphone processing: Audio converted to Float32Array (as JSON array), sent via HTTP REST
 2. **API → SDK**: Same direct calls as CLI, but with decoded audio data
 3. **SDK → API**: Results returned as Python objects
-4. **API → UI**: Results serialized to JSON, sent via HTTP/WebSocket
+4. **API → UI**: Results serialized to JSON, sent via HTTP REST
 
 ## **Architecture Diagrams**
 
@@ -60,7 +68,7 @@ graph TB
     end
     
     subgraph "Layer 2b: API Client"
-        API[api/server.py<br/>FastAPI REST + WebSocket]
+        API[api/server.py<br/>FastAPI REST API only]
     end
     
     subgraph "Layer 2a: CLI Client"
@@ -71,7 +79,7 @@ graph TB
         SDK[groq_speech/<br/>speech_recognizer.py<br/>speaker_diarization.py]
     end
     
-    UI -->|HTTP/WebSocket| API
+    UI -->|HTTP REST| API
     CLI -->|Direct Calls| SDK
     API -->|Direct Calls| SDK
     
@@ -106,12 +114,12 @@ sequenceDiagram
     
     User->>UI: Select operation
     UI->>UI: Process audio input
-    UI->>API: HTTP/WebSocket request
+    UI->>API: HTTP REST request
     API->>API: Decode audio data
     API->>SDK: Direct function call
     SDK->>SDK: Process audio
     SDK->>API: Return result
-    API->>UI: HTTP/WebSocket response
+    API->>UI: HTTP REST response
     UI->>User: Display result
 ```
 
@@ -123,7 +131,9 @@ graph LR
     end
     
     subgraph "Web UI Path"
-        B1[Audio File/Mic] --> B2[base64] --> B3[HTTP/WebSocket] --> B4[base64 decode] --> B5[numpy array] --> B6[SDK Processing] --> B7[JSON] --> B8[HTTP/WebSocket] --> B9[UI Display]
+        B1[Audio File/Mic] --> B2{File or Mic?}
+        B2 -->|File| B3[base64] --> B4[HTTP REST] --> B5[base64 decode] --> B6[numpy array] --> B7[SDK Processing] --> B8[JSON] --> B9[HTTP REST] --> B10[UI Display]
+        B2 -->|Mic| B11[Float32Array] --> B12[HTTP REST] --> B13[Array conversion] --> B6[numpy array] --> B7[SDK Processing] --> B8[JSON] --> B9[HTTP REST] --> B10[UI Display]
     end
     
     style A1 fill:#e8f5e8
@@ -234,7 +244,7 @@ sequenceDiagram
     CLI->>User: Display transcription result
 ```
 
-#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+#### **Web UI Flow (Multi-Layer with REST API):**
 ```mermaid
 sequenceDiagram
     participant User
@@ -245,16 +255,16 @@ sequenceDiagram
     User->>UI: Select "Single Microphone" → Start recording
     UI->>UI: AudioRecorder.startRecording() → Web Audio API
     User->>UI: Stop recording
-    UI->>UI: Convert to base64
-    UI->>API: GroqAPIClient.processAudioWithWebSocket() → WebSocket /ws/recognize
-    API->>API: WebSocket handler /ws/recognize
-    API->>API: Decode base64 audio → Convert to numpy array
+    UI->>UI: Convert to Float32Array
+    UI->>API: GroqAPIClient.processAudio() → HTTP POST /api/v1/recognize-microphone
+    API->>API: recognize_microphone_single() endpoint
+    API->>API: Convert JSON array to numpy array
     API->>SDK: recognizer.recognize_audio_data() → Same as CLI
     SDK->>SDK: AudioProcessor.process_audio()
     SDK->>SDK: GroqAPIClient.transcribe()
     SDK->>SDK: ResponseParser.parse_response()
     SDK->>API: SpeechRecognitionResult
-    API->>UI: WebSocket message → Frontend display
+    API->>UI: RecognitionResponse → HTTP response
     UI->>User: Display transcription result
 ```
 
@@ -278,7 +288,7 @@ sequenceDiagram
     CLI->>User: Display transcription with speaker attribution
 ```
 
-#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+#### **Web UI Flow (Multi-Layer with REST API):**
 ```mermaid
 sequenceDiagram
     participant User
@@ -289,16 +299,16 @@ sequenceDiagram
     User->>UI: Select "Single Microphone + Diarization" → Start recording
     UI->>UI: AudioRecorder.startRecording() → Web Audio API
     User->>UI: Stop recording
-    UI->>UI: Convert to base64
-    UI->>API: GroqAPIClient.processAudioWithWebSocket(enableDiarization=true) → WebSocket
-    API->>API: WebSocket handler with diarization
+    UI->>UI: Convert to Float32Array
+    UI->>API: GroqAPIClient.processAudio(enableDiarization=true) → HTTP POST /api/v1/recognize-microphone
+    API->>API: recognize_microphone_single() with diarization
     API->>API: Save to temp file for diarization
     API->>SDK: recognizer.process_file(temp_path, enable_diarization=True) → Same as CLI
     SDK->>SDK: Pyannote.audio → Speaker Detection
     SDK->>SDK: Audio Chunking → Speaker-specific segments
     SDK->>SDK: Groq API per segment → Accurate transcription
     SDK->>API: DiarizationResult with speaker segments
-    API->>UI: WebSocket diarization_result message → Frontend display
+    API->>UI: RecognitionResponse with segments → HTTP response
     UI->>User: Display transcription with speaker attribution
 ```
 
@@ -414,7 +424,7 @@ sequenceDiagram
     CLI->>User: Continuous processing completed
 ```
 
-#### **Web UI Flow (Multi-Layer with WebSocket Boundaries):**
+#### **Web UI Flow (Multi-Layer with REST API):**
 ```mermaid
 sequenceDiagram
     participant User
@@ -423,16 +433,16 @@ sequenceDiagram
     participant SDK as Layer 1: SDK
     
     User->>UI: Select "Continuous Microphone" → Start recording
-    UI->>UI: AudioRecorder.startContinuousRecording() → Web Audio API with chunking
+    UI->>UI: ContinuousAudioRecorder.startRecording() → Web Audio API with VAD chunking
     loop For each chunk
-        UI->>API: GroqAPIClient.sendAudioData() → WebSocket
-        API->>API: WebSocket handler processes each chunk
+        UI->>API: GroqAPIClient.processAudio() → HTTP POST /api/v1/recognize-microphone-continuous
+        API->>API: recognize_microphone_continuous() processes each chunk
         API->>SDK: recognizer.recognize_audio_data() → Same as CLI
         SDK->>SDK: AudioProcessor.process_audio()
         SDK->>SDK: GroqAPIClient.transcribe()
         SDK->>SDK: ResponseParser.parse_response()
         SDK->>API: SpeechRecognitionResult
-        API->>UI: WebSocket messages for each result → Frontend display
+        API->>UI: RecognitionResponse for each result → HTTP response
         UI->>User: Display transcription result
     end
     User->>UI: Stop recording
@@ -592,11 +602,13 @@ sequenceDiagram
 
 ### **Audio Processing:**
 - **CLI**: Uses PyAudio for microphone input, direct numpy array processing
-- **Web UI**: Uses Web Audio API, converts to base64 for transmission
+- **Web UI**: 
+  - File processing: Uses Web Audio API, converts to base64 for transmission
+  - Microphone processing: Uses Web Audio API, converts to Float32Array (JSON array) for transmission
 
 ### **API Communication:**
 - **CLI**: Direct function calls to `groq_speech` module
-- **Web UI**: HTTP REST API + WebSocket for real-time communication
+- **Web UI**: HTTP REST API for all communication
 
 ### **Diarization Handling:**
 - **CLI**: Direct file processing with `process_file()`
@@ -609,8 +621,8 @@ sequenceDiagram
 ## 🚨 **Potential Issues to Check**
 
 1. **Audio Format Consistency**: CLI uses 16kHz, ensure Web UI matches
-2. **Base64 Encoding**: Verify audio data is properly encoded/decoded
-3. **WebSocket State Management**: Check connection handling
+2. **Float32Array Conversion**: Verify audio data is properly converted between formats
+3. **REST API State Management**: Check request/response handling
 4. **Diarization Temp Files**: Ensure proper cleanup in API server
 5. **Error Handling**: Verify consistent error responses
 6. **Translation Configuration**: Ensure translation mode is properly set
@@ -620,7 +632,7 @@ sequenceDiagram
 - **CLI**: Direct processing, fastest
 - **Web UI**: Network overhead, but same core processing
 - **Diarization**: Most expensive operation, requires temp files
-- **Continuous Mode**: Real-time processing, WebSocket for low latency
+- **Continuous Mode**: Real-time processing, REST API for chunk-based processing
 
 ## 🎯 **Layer Transition Summary**
 
@@ -643,32 +655,55 @@ The Groq Speech SDK uses a **3-layer architecture** with **parallel client inter
 #### **Layer 2b: API Client (`api/`)**
 - **Purpose**: Web API server that exposes SDK functionality
 - **Key Files**: `api/server.py`
-- **Responsibilities**: HTTP/WebSocket endpoints, request/response handling, data serialization
-- **Interface**: HTTP REST API + WebSocket to Layer 3, direct calls to Layer 1
+- **Responsibilities**: HTTP REST endpoints, request/response handling, data serialization
+- **Interface**: HTTP REST API to Layer 3, direct calls to Layer 1
 
 #### **Layer 3: UI Client (`groq-speech-ui/`)**
 - **Purpose**: Web-based user interface
-- **Key Files**: `EnhancedSpeechDemo.tsx`, `SpeechRecognition.tsx`, `groq-api.ts`
+- **Key Files**: `EnhancedSpeechDemo.tsx`, `PerformanceMetrics.tsx`, `groq-api.ts`
 - **Responsibilities**: User interface, audio recording, API communication
-- **Interface**: HTTP requests and WebSocket connections to Layer 2b
+- **Interface**: HTTP REST requests to Layer 2b
 
 
 ### **Data Flow Transformations**
 
 #### **Audio Data Flow:**
 1. **CLI**: File/Microphone → numpy array → SDK
-2. **Web UI**: File/Microphone → base64 → HTTP → base64 decode → numpy array → SDK
+2. **Web UI**: 
+   - File: File → base64 → HTTP REST → base64 decode → numpy array → SDK
+   - Microphone: Microphone → Float32Array → HTTP REST → array conversion → numpy array → SDK
 
 #### **Result Data Flow:**
 1. **CLI**: SDK result → Console output
-2. **Web UI**: SDK result → JSON serialization → HTTP response → JSON parsing → UI display
+2. **Web UI**: SDK result → JSON serialization → HTTP REST response → JSON parsing → UI display
 
 ### **Key Insights**
 
 1. **Same Core Logic**: Both CLI and Web UI use identical SDK processing
-2. **Different Interfaces**: CLI uses direct calls, Web UI uses network protocols
-3. **Data Serialization**: Web UI requires base64 encoding/decoding for audio data
+2. **Different Interfaces**: CLI uses direct calls, Web UI uses HTTP REST protocols
+3. **Data Serialization**: Web UI requires Float32Array conversion for audio data
 4. **Error Handling**: Web UI needs additional error handling for network issues
 5. **Performance**: CLI is faster (no network overhead), Web UI is more accessible
+
+## 🔌 **Current API Endpoints**
+
+The API server provides the following REST endpoints:
+
+### **Core Endpoints:**
+- `POST /api/v1/recognize` - File transcription with base64 audio data
+- `POST /api/v1/translate` - File translation with base64 audio data
+- `POST /api/v1/recognize-microphone` - Single microphone processing with Float32Array
+- `POST /api/v1/recognize-microphone-continuous` - Continuous microphone processing with Float32Array
+
+### **Utility Endpoints:**
+- `GET /health` - Health check endpoint
+- `GET /api/v1/models` - Available Groq models
+- `GET /api/v1/languages` - Supported languages
+- `POST /api/log` - Frontend logging
+
+### **Data Formats:**
+- **File Processing**: Base64-encoded audio data (WAV format)
+- **Microphone Processing**: Float32Array as JSON array (raw PCM data)
+- **All Responses**: JSON with success/error status and results
 
 This architecture ensures the Web UI provides the same functionality as the CLI but through a web interface with proper separation of concerns.

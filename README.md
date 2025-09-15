@@ -66,7 +66,7 @@ python examples/speech_demo.py --microphone-mode continuous --diarize
 - **Speaker Diarization**: Multi-speaker detection and separation using Pyannote.audio
 - **Voice Activity Detection**: Intelligent silence detection and audio segmentation
 - **Web Interface**: Modern React-based UI for easy testing and demonstration
-- **REST API**: FastAPI backend with both REST and WebSocket endpoints
+- **REST API**: FastAPI backend with REST endpoints
 
 ### Audio Processing
 - **Microphone Input**: Real-time audio capture with configurable parameters
@@ -77,7 +77,7 @@ python examples/speech_demo.py --microphone-mode continuous --diarize
 ### Web Interface
 - **Modern UI**: React-based interface with real-time feedback
 - **Multiple Modes**: File upload, microphone recording, continuous processing
-- **Real-time Results**: WebSocket-based streaming for continuous recognition
+- **Real-time Results**: REST API-based processing for continuous recognition
 - **Performance Metrics**: Live timing and performance monitoring
 
 ## 🏗️ Architecture
@@ -92,11 +92,11 @@ The SDK follows a **3-layer architecture with parallel client interfaces**:
 
 ### Layer 2: Client Interfaces (Parallel)
 - **CLI Client** (`speech_demo.py`): Command-line interface
-- **API Client** (`api/server.py`): FastAPI REST + WebSocket server
+- **API Client** (`api/server.py`): FastAPI REST server
 
 ### Layer 3: Web Interface (`groq-speech-ui/`)
 - **React Frontend**: Modern web interface with real-time processing
-- **WebSocket Integration**: Real-time streaming for continuous recognition
+- **REST API Integration**: Real-time processing for continuous recognition
 
 ### Key Design Principles
 - **Single Responsibility**: Each component has one clear purpose
@@ -172,7 +172,7 @@ print(f"Translated: {result.text}")
 ```
 
 #### Continuous Recognition (Web Interface)
-The web interface provides continuous recognition through WebSocket connections:
+The web interface provides continuous recognition through REST API calls:
 - Real-time audio streaming
 - Automatic chunking and processing
 - Live results display
@@ -211,7 +211,7 @@ npm run dev
 ### Features
 - **File Upload**: Drag and drop audio files for processing
 - **Microphone Recording**: Real-time audio capture and processing
-- **Continuous Mode**: Stream processing with WebSocket
+- **Continuous Mode**: Stream processing with REST API
 - **Speaker Diarization**: Visual speaker separation and attribution
 - **Performance Metrics**: Real-time timing and performance data
 - **Multiple Languages**: Support for transcription and translation
@@ -219,8 +219,42 @@ npm run dev
 ### API Endpoints
 - `POST /api/v1/recognize` - File transcription
 - `POST /api/v1/translate` - File translation
-- `WebSocket /ws/recognize` - Real-time processing
+- `POST /api/v1/recognize-microphone` - Single microphone processing
+- `POST /api/v1/recognize-microphone-continuous` - Continuous microphone processing
 - `GET /health` - Health check
+
+## 🚀 Deployment
+
+### Local Development with Docker
+```bash
+# CPU-only development
+cd deployment/docker
+docker-compose up --build
+
+# GPU-enabled development
+docker-compose -f docker-compose.gpu.yml up --build
+```
+
+### GCP CloudRun with GPU Support
+```bash
+# Set environment variables
+export PROJECT_ID="your-gcp-project-id"
+export GROQ_API_KEY="your-groq-api-key"
+export HF_TOKEN="your-huggingface-token"
+
+# Deploy with GPU support
+cd deployment/gcp
+./deploy.sh
+```
+
+### Deployment Features
+- **GPU Support**: Automatic CUDA detection and optimization
+- **Auto-scaling**: CloudRun auto-scaling based on demand
+- **Health Monitoring**: Built-in health checks and monitoring
+- **Security**: GCP Secret Manager integration
+- **Performance**: Optimized for diarization workloads
+
+For detailed deployment instructions, see [deployment/README.md](deployment/README.md).
 
 ## ⚙️ Configuration
 
@@ -247,14 +281,14 @@ config.set_translation_target_language("en")
 
 ### Processing Modes
 - **File Processing**: Batch processing with automatic chunking
-- **Real-time Processing**: WebSocket-based streaming with low latency
+- **Real-time Processing**: REST API-based processing with low latency
 - **Diarization**: Pyannote.audio-based speaker detection and separation
 - **Voice Activity Detection**: Intelligent silence detection and audio segmentation
 
 ### Optimization Features
 - **Intelligent Chunking**: Automatic audio segmentation for optimal processing
 - **Voice Activity Detection**: Skip silent segments to improve efficiency
-- **WebSocket Streaming**: Real-time processing with minimal latency
+- **REST API Streaming**: Real-time processing with minimal latency
 - **Error Handling**: Automatic retry and graceful degradation
 
 ## 🚨 Error Handling
@@ -309,17 +343,23 @@ python examples/speech_demo.py --microphone-mode continuous
 ## 📚 Documentation
 
 ### Architecture & Technical Details
-- [Architecture Analysis](ARCHITECTURE_ANALYSIS.md) - Complete system architecture with Mermaid diagrams
-- [Code Analysis](CODE_ANALYSIS.md) - Detailed code analysis and implementation patterns
+- [Architecture Overview](docs/ARCHITECTURE.md) - Complete system architecture with Mermaid diagrams
+- [Code Analysis](docs/CODE_ANALYSIS.md) - Detailed code analysis and implementation patterns
 - [API Reference](groq_speech/API_REFERENCE.md) - Complete API reference
 
 ### Web Interface
 - [Frontend README](examples/groq-speech-ui/README.md) - Web interface documentation
 - [Backend Setup](examples/groq-speech-ui/BACKEND_SETUP.md) - Backend configuration guide
 
-### Development
-- [Contributing Guide](CONTRIBUTING.md) - Development guidelines and standards
-- [Changelog](CHANGELOG.md) - Version history and changes
+### Development & Testing
+- [Contributing Guide](docs/CONTRIBUTING.md) - Development guidelines and standards
+- [Changelog](docs/CHANGELOG.md) - Version history and changes
+- [Debugging Guide](docs/DEBUGGING_GUIDE.md) - Comprehensive debugging instructions
+- [API Testing Guide](docs/POSTMAN_TESTING_GUIDE.md) - API testing with Postman
+- [API Status Report](docs/API_STATUS_REPORT.md) - Current API status and capabilities
+
+### Deployment
+- [Deployment Guide](deployment/README.md) - Docker and GCP CloudRun deployment instructions
 
 ## 🤝 Contributing
 

@@ -77,6 +77,21 @@ check_dependencies() {
     log "Python dependencies check passed"
 }
 
+# Function to test GPU support
+test_gpu_support() {
+    if [ -f "test_gpu_support.py" ]; then
+        log "Testing GPU support..."
+        python test_gpu_support.py
+        if [ $? -eq 0 ]; then
+            log "GPU support test passed"
+        else
+            log "WARNING: GPU support test failed, continuing with CPU fallback"
+        fi
+    else
+        log "GPU test script not found, skipping GPU test"
+    fi
+}
+
 # Function to run database migrations (if applicable)
 run_migrations() {
     if [ -f "alembic.ini" ]; then
@@ -119,6 +134,9 @@ main() {
     
     # Check dependencies
     check_dependencies
+    
+    # Test GPU support
+    test_gpu_support
     
     # Create directories
     create_directories

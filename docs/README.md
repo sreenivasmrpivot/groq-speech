@@ -9,16 +9,24 @@ Welcome to the Groq Speech SDK documentation! This index will help you find the 
 
 ### **🏗️ Technical Documentation**
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete system architecture with Mermaid diagrams
-- **[CODE_ANALYSIS.md](../CODE_ANALYSIS.md)** - Detailed code analysis and implementation patterns
+- **[CODE_ANALYSIS.md](CODE_ANALYSIS.md)** - Detailed code analysis and implementation patterns
 - **[API_REFERENCE.md](../groq_speech/API_REFERENCE.md)** - Complete API reference
 
 ### **🌐 Web Interface**
 - **[examples/groq-speech-ui/README.md](../examples/groq-speech-ui/README.md)** - Web UI documentation
 - **[examples/groq-speech-ui/BACKEND_SETUP.md](../examples/groq-speech-ui/BACKEND_SETUP.md)** - Backend setup guide
 
+### **🔧 Development & Testing**
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines and development standards
+- **[DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md)** - Comprehensive debugging instructions
+- **[POSTMAN_TESTING_GUIDE.md](POSTMAN_TESTING_GUIDE.md)** - API testing with Postman
+- **[API_STATUS_REPORT.md](API_STATUS_REPORT.md)** - Current API status and capabilities
+
 ### **📝 Project Management**
-- **[CHANGELOG.md](../CHANGELOG.md)** - Project changelog and version history
-- **[CONTRIBUTING.md](../CONTRIBUTING.md)** - Contribution guidelines
+- **[CHANGELOG.md](CHANGELOG.md)** - Project changelog and version history
+
+### **🚀 Deployment**
+- **[deployment/README.md](../deployment/README.md)** - Docker and GCP CloudRun deployment instructions
 
 ## 🎯 **Quick Navigation**
 
@@ -46,8 +54,12 @@ Welcome to the Groq Speech SDK documentation! This index will help you find the 
 | **API_REFERENCE.md** | API documentation | Developers | Complete API reference, methods |
 | **groq-speech-ui/README.md** | Web interface | Web users | UI features, usage instructions |
 | **BACKEND_SETUP.md** | Backend setup | Developers | Server configuration, deployment |
-| **CHANGELOG.md** | Version history | All users | Changes, updates, releases |
 | **CONTRIBUTING.md** | Contribution guide | Contributors | Development setup, guidelines |
+| **DEBUGGING_GUIDE.md** | Debugging instructions | Developers | Debug setup, troubleshooting |
+| **POSTMAN_TESTING_GUIDE.md** | API testing | Testers | Postman collection, test scenarios |
+| **API_STATUS_REPORT.md** | API status | All users | Current capabilities, limitations |
+| **CHANGELOG.md** | Version history | All users | Changes, updates, releases |
+| **deployment/README.md** | Deployment guide | DevOps | Docker, GCP CloudRun deployment |
 
 ## 🚀 **Getting Started**
 

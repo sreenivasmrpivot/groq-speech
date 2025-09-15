@@ -84,6 +84,14 @@ def _import_pyannote():
     try:
         from pyannote.audio import Pipeline
         from pyannote.core.annotation import Annotation
+        import torch
+        
+        # Check GPU availability
+        if torch.cuda.is_available():
+            print("   🔧 CUDA available for Pyannote.audio GPU acceleration")
+        else:
+            print("   ℹ️ CUDA not available, using CPU for Pyannote.audio")
+            
         PYANNOTE_AVAILABLE = True
         return True
     except ImportError:
@@ -875,12 +883,31 @@ class Diarizer:
             if not hf_token or hf_token == "your_hf_token_here":
                 raise ValueError("HF_TOKEN not configured for Pyannote.audio")
             
-            # Initialize Pyannote pipeline
+            # Initialize Pyannote pipeline with GPU support
             from pyannote.audio import Pipeline
+            import torch
+            
+            # Get optimal device using SpeechConfig utility
+            optimal_device = SpeechConfig.get_optimal_device()
+            device = torch.device(optimal_device)
+            
+            # Get GPU info for logging
+            gpu_info = SpeechConfig.get_gpu_info()
+            if gpu_info["cuda_available"]:
+                print(f"   🔧 Using GPU: {gpu_info['device_name']} (Device {gpu_info['current_device']})")
+                print(f"   📊 GPU Memory: {gpu_info['memory_allocated'] / 1024**3:.2f}GB allocated, {gpu_info['memory_reserved'] / 1024**3:.2f}GB reserved")
+            else:
+                print(f"   🔧 Using CPU (GPU not available)")
+            
+            # Load the pretrained pipeline
             pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
                 use_auth_token=hf_token
             )
+            
+            # Move the pipeline to the optimal device
+            pipeline = pipeline.to(device)
+            print(f"   ✅ Pipeline loaded and moved to {device}")
             
             # Run diarization to get speaker segments
             diarization = pipeline(audio_file)

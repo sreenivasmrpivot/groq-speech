@@ -436,3 +436,44 @@ class SpeechConfig:
             "chunk_strategy": cls.DIARIZATION_CHUNK_STRATEGY,
             "max_speakers": cls.DIARIZATION_MAX_SPEAKERS,
         }
+
+    @staticmethod
+    def get_gpu_info() -> Dict[str, Any]:
+        """Get GPU information for Pyannote.audio optimization."""
+        try:
+            import torch
+            gpu_info = {
+                "cuda_available": torch.cuda.is_available(),
+                "device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+                "current_device": torch.cuda.current_device() if torch.cuda.is_available() else None,
+                "device_name": None,
+                "memory_allocated": 0,
+                "memory_reserved": 0
+            }
+            
+            if gpu_info["cuda_available"]:
+                gpu_info["device_name"] = torch.cuda.get_device_name(0)
+                gpu_info["memory_allocated"] = torch.cuda.memory_allocated(0)
+                gpu_info["memory_reserved"] = torch.cuda.memory_reserved(0)
+                
+            return gpu_info
+        except ImportError:
+            return {
+                "cuda_available": False,
+                "device_count": 0,
+                "current_device": None,
+                "device_name": None,
+                "memory_allocated": 0,
+                "memory_reserved": 0,
+                "error": "PyTorch not available"
+            }
+
+    @staticmethod
+    def get_optimal_device() -> str:
+        """Get the optimal device for Pyannote.audio processing."""
+        gpu_info = SpeechConfig.get_gpu_info()
+        
+        if gpu_info["cuda_available"] and gpu_info["device_count"] > 0:
+            return "cuda"
+        else:
+            return "cpu"

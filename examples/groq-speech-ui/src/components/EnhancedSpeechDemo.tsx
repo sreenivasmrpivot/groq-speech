@@ -49,11 +49,10 @@ interface CommandConfig {
     mode: 'single' | 'continuous';
     operation: 'transcription' | 'translation';
     diarization: boolean;
-    endpoint: 'rest' | 'websocket';
 }
 
 const COMMAND_CONFIGS: CommandConfig[] = [
-    // File-based commands (REST API)
+    // File-based commands
     {
         id: 'file_transcription',
         name: 'File Transcription',
@@ -63,7 +62,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'single',
         operation: 'transcription',
         diarization: false,
-        endpoint: 'rest'
     },
     {
         id: 'file_transcription_diarize',
@@ -74,7 +72,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'single',
         operation: 'transcription',
         diarization: true,
-        endpoint: 'rest'
     },
     {
         id: 'file_translation',
@@ -85,7 +82,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'single',
         operation: 'translation',
         diarization: false,
-        endpoint: 'rest'
     },
     {
         id: 'file_translation_diarize',
@@ -96,9 +92,8 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'single',
         operation: 'translation',
         diarization: true,
-        endpoint: 'rest'
     },
-    // Microphone single commands (WebSocket)
+    // Microphone single commands
     {
         id: 'microphone_single',
         name: 'Single Microphone',
@@ -108,7 +103,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'single',
         operation: 'transcription',
         diarization: false,
-        endpoint: 'websocket'
     },
     {
         id: 'microphone_single_diarize',
@@ -119,7 +113,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'single',
         operation: 'transcription',
         diarization: true,
-        endpoint: 'websocket'
     },
     {
         id: 'microphone_single_translation',
@@ -130,7 +123,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'single',
         operation: 'translation',
         diarization: false,
-        endpoint: 'websocket'
     },
     {
         id: 'microphone_single_translation_diarize',
@@ -141,9 +133,8 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'single',
         operation: 'translation',
         diarization: true,
-        endpoint: 'websocket'
     },
-    // Microphone continuous commands (WebSocket)
+    // Microphone continuous commands
     {
         id: 'microphone_continuous',
         name: 'Continuous Microphone',
@@ -153,7 +144,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'continuous',
         operation: 'transcription',
         diarization: false,
-        endpoint: 'websocket'
     },
     {
         id: 'microphone_continuous_diarize',
@@ -164,7 +154,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'continuous',
         operation: 'transcription',
         diarization: true,
-        endpoint: 'websocket'
     },
     {
         id: 'microphone_continuous_translation',
@@ -175,7 +164,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'continuous',
         operation: 'translation',
         diarization: false,
-        endpoint: 'websocket'
     },
     {
         id: 'microphone_continuous_translation_diarize',
@@ -186,7 +174,6 @@ const COMMAND_CONFIGS: CommandConfig[] = [
         mode: 'continuous',
         operation: 'translation',
         diarization: true,
-        endpoint: 'websocket'
     }
 ];
 
@@ -1096,8 +1083,7 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                                         category: config.category,
                                         mode: config.mode,
                                         operation: config.operation,
-                                        diarization: config.diarization,
-                                        endpoint: config.endpoint
+                                        diarization: config.diarization
                                     });
                                     setSelectedCommand(config.id);
                                 }}
@@ -1130,11 +1116,6 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                                             diarization
                                         </span>
                                     )}
-                                    <span className={`px-2 py-1 text-xs rounded ${
-                                        config.endpoint === 'rest' ? 'bg-gray-100 text-gray-800' : 'bg-yellow-100 text-yellow-800'
-                                    }`}>
-                                        {config.endpoint}
-                                    </span>
                                 </div>
                             </button>
                         ))}
