@@ -1,114 +1,185 @@
-# Documentation Index
+# Groq Speech SDK - Documentation
 
-Welcome to the Groq Speech SDK documentation! This index will help you find the information you need.
+## 📚 **Documentation Index**
 
-## 📚 **Documentation Structure**
+This directory contains comprehensive documentation for the Groq Speech SDK.
 
-### **🏠 Project Overview**
-- **[README.md](../README.md)** - Main project overview, quick start, and comprehensive usage guide
+### **🏗️ Architecture & Design**
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete system architecture analysis
+- **[CODE_ANALYSIS.md](CODE_ANALYSIS.md)** - Detailed code analysis and technical decisions
 
-### **🏗️ Technical Documentation**
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete system architecture with Mermaid diagrams
-- **[CODE_ANALYSIS.md](CODE_ANALYSIS.md)** - Detailed code analysis and implementation patterns
-- **[API_REFERENCE.md](../groq_speech/API_REFERENCE.md)** - Complete API reference
-
-### **🌐 Web Interface**
-- **[examples/groq-speech-ui/README.md](../examples/groq-speech-ui/README.md)** - Web UI documentation
-- **[examples/groq-speech-ui/BACKEND_SETUP.md](../examples/groq-speech-ui/BACKEND_SETUP.md)** - Backend setup guide
+### **🚀 Deployment & Operations**
+- **[Deployment Guide](../deployment/README.md)** - Docker, Cloud Run, and production deployment
+- **[API Status Report](API_STATUS_REPORT.md)** - Current API endpoint status and functionality
 
 ### **🔧 Development & Testing**
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines and development standards
-- **[DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md)** - Comprehensive debugging instructions
-- **[POSTMAN_TESTING_GUIDE.md](POSTMAN_TESTING_GUIDE.md)** - API testing with Postman
-- **[API_STATUS_REPORT.md](API_STATUS_REPORT.md)** - Current API status and capabilities
+- **[Contributing Guide](CONTRIBUTING.md)** - Development guidelines and contribution process
+- **[Postman Testing Guide](POSTMAN_TESTING_GUIDE.md)** - API testing with Postman
 
-### **📝 Project Management**
-- **[CHANGELOG.md](CHANGELOG.md)** - Project changelog and version history
-
-### **🚀 Deployment**
-- **[deployment/README.md](../deployment/README.md)** - Docker and GCP CloudRun deployment instructions
+### **📖 User Guides**
+- **[Main README](../README.md)** - Quick start and overview
+- **[SDK API Reference](../groq_speech/API_REFERENCE.md)** - Complete SDK API documentation
 
 ## 🎯 **Quick Navigation**
 
-### **For New Users:**
-1. Start with **[README.md](../README.md)** for project overview and comprehensive usage
-2. Check **[examples/groq-speech-ui/README.md](../examples/groq-speech-ui/README.md)** for web interface
-3. Review **[API_REFERENCE.md](../groq_speech/API_REFERENCE.md)** for detailed API usage
+### **For Users**
+1. Start with [Main README](../README.md) for quick start
+2. Check [Deployment Guide](../deployment/README.md) for setup
+3. Review [SDK API Reference](../groq_speech/API_REFERENCE.md) for usage
 
-### **For Developers:**
-1. Review **[ARCHITECTURE.md](ARCHITECTURE.md)** for complete system architecture
-2. Read **[CODE_ANALYSIS.md](../CODE_ANALYSIS.md)** for implementation details
-3. Check **[CONTRIBUTING.md](../CONTRIBUTING.md)** for contribution guidelines
+### **For Developers**
+1. Read [ARCHITECTURE.md](ARCHITECTURE.md) for system understanding
+2. Study [CODE_ANALYSIS.md](CODE_ANALYSIS.md) for implementation details
+3. Follow [Contributing Guide](CONTRIBUTING.md) for development
 
-### **For Web UI Users:**
-1. Check **[examples/groq-speech-ui/README.md](../examples/groq-speech-ui/README.md)** for web interface
-2. Read **[examples/groq-speech-ui/BACKEND_SETUP.md](../examples/groq-speech-ui/BACKEND_SETUP.md)** for setup
+### **For DevOps**
+1. Use [Deployment Guide](../deployment/README.md) for production setup
+2. Check [API Status Report](API_STATUS_REPORT.md) for monitoring
+3. Review [Postman Testing Guide](POSTMAN_TESTING_GUIDE.md) for testing
 
-## 🔍 **What Each Document Covers**
+## 🏗️ **System Overview**
 
-| Document | Purpose | Audience | Content |
-|----------|---------|----------|---------|
-| **README.md** | Project overview | All users | Quick start, features, comprehensive usage |
-| **ARCHITECTURE.md** | Technical architecture | Developers | System design, data flow, Mermaid diagrams |
-| **CODE_ANALYSIS.md** | Code implementation | Developers | Detailed code analysis, patterns |
-| **API_REFERENCE.md** | API documentation | Developers | Complete API reference, methods |
-| **groq-speech-ui/README.md** | Web interface | Web users | UI features, usage instructions |
-| **BACKEND_SETUP.md** | Backend setup | Developers | Server configuration, deployment |
-| **CONTRIBUTING.md** | Contribution guide | Contributors | Development setup, guidelines |
-| **DEBUGGING_GUIDE.md** | Debugging instructions | Developers | Debug setup, troubleshooting |
-| **POSTMAN_TESTING_GUIDE.md** | API testing | Testers | Postman collection, test scenarios |
-| **API_STATUS_REPORT.md** | API status | All users | Current capabilities, limitations |
-| **CHANGELOG.md** | Version history | All users | Changes, updates, releases |
-| **deployment/README.md** | Deployment guide | DevOps | Docker, GCP CloudRun deployment |
+The Groq Speech SDK is a comprehensive speech recognition and translation system with three main components:
 
-## 🚀 **Getting Started**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Layer 3: User Interfaces                │
+├─────────────────────────────────────────────────────────────┤
+│  CLI Client (speech_demo.py)  │  Web UI (groq-speech-ui)   │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Layer 2: API Layer                      │
+├─────────────────────────────────────────────────────────────┤
+│                    FastAPI Server (api/)                   │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Layer 1: Core SDK                       │
+├─────────────────────────────────────────────────────────────┤
+│              groq_speech/ (Python SDK)                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 🔄 **Key Features**
+
+### **Speech Processing**
+- ✅ **File Transcription** - Process audio files with high accuracy
+- ✅ **File Translation** - Translate audio to different languages
+- ✅ **Speaker Diarization** - Identify and separate multiple speakers
+- ✅ **Microphone Processing** - Real-time audio processing
+
+### **Advanced Features**
+- ✅ **Voice Activity Detection** - Client-side real-time VAD
+- ✅ **Continuous Processing** - Long-form audio with chunking
+- ✅ **GPU Acceleration** - CUDA support for diarization
+- ✅ **Performance Monitoring** - Built-in metrics and analytics
+
+### **Deployment Options**
+- ✅ **Local Development** - Docker Compose with hot reload
+- ✅ **Production** - Docker containers with GPU support
+- ✅ **Cloud Run** - GCP Cloud Run with GPU acceleration
+
+## 📊 **Current Status**
+
+### **Working Features**
+- **CLI Interface**: All 10 command types working perfectly
+- **Web Interface**: Complete feature parity with CLI
+- **API Server**: REST API with all endpoints functional
+- **VAD Processing**: Client-side real-time silence detection
+- **Diarization**: GPU-accelerated speaker diarization
+- **Translation**: Multi-language translation support
+
+### **Performance**
+- **CLI**: Direct SDK access, no network overhead
+- **Web UI**: Client-side VAD for real-time processing
+- **API**: REST API with efficient audio processing
+- **GPU**: Automatic CUDA detection and usage
+
+## 🔧 **Technical Highlights**
+
+### **Architecture Decisions**
+1. **Client-Side VAD** - Real-time processing without network latency
+2. **Unified Components** - Single classes handle multiple modes
+3. **REST API Only** - Simplified architecture, easier maintenance
+4. **SDK Factory Methods** - Centralized configuration creation
+
+### **Performance Optimizations**
+1. **Chunked Processing** - Handles large files efficiently
+2. **Memory Management** - Optimized for both short and long audio
+3. **GPU Support** - Automatic detection and usage
+4. **Real-Time VAD** - 15-second silence detection
+
+## 📈 **Getting Started**
 
 ### **1. Quick Start**
 ```bash
-# Clone and setup
-git clone <repository>
+# Clone repository
+git clone <repository-url>
 cd groq-speech
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 
-# Test basic functionality
-python examples/speech_demo.py --basic --mode transcription
+# Install dependencies
+pip install -r requirements.txt
+cd examples/groq-speech-ui && npm install
+
+# Configure environment
+cp groq_speech/env.template groq_speech/.env
+# Edit with your API keys
+
+# Run CLI
+python examples/speech_demo.py --file audio.wav
+
+# Run Web UI
+cd api && python server.py &
+cd examples/groq-speech-ui && npm run dev
 ```
 
-### **2. Learn the Features**
-- Read **[COMPLETE_USAGE_GUIDE.md](COMPLETE_USAGE_GUIDE.md)** for all capabilities
-- Try different modes with **[examples/README.md](../examples/README.md)**
+### **2. Docker Deployment**
+```bash
+# Standard deployment
+docker-compose -f deployment/docker/docker-compose.yml up
 
-### **3. Advanced Usage**
-- Review **[ARCHITECTURE.md](ARCHITECTURE.md)** for technical details
-- Customize configuration for your use case
+# GPU-enabled deployment
+docker-compose -f deployment/docker/docker-compose.gpu.yml up
+```
 
-## 💡 **Documentation Philosophy**
+### **3. Cloud Run Deployment**
+```bash
+# Deploy to GCP Cloud Run
+cd deployment/gcp
+./deploy.sh
+```
 
-We've consolidated the documentation to eliminate confusion and provide:
+## 🤝 **Contributing**
 
-- **Single source of truth** for each topic
-- **Clear navigation** between different aspects
-- **Comprehensive coverage** without duplication
-- **Easy maintenance** and updates
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-## 🔄 **Documentation Updates**
+### **Development Setup**
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-- **README.md**: Updated with accurate usage patterns
-- **COMPLETE_USAGE_GUIDE.md**: Comprehensive guide to all features
-- **ARCHITECTURE.md**: Consolidated technical information
-- **examples/README.md**: Clear examples and usage patterns
+### **Code Standards**
+- Follow existing code patterns
+- Add comprehensive documentation
+- Include tests for new features
+- Update documentation as needed
 
-## 📞 **Need Help?**
+## 📞 **Support**
 
-If you can't find what you're looking for:
+For issues and questions:
+1. Check the [documentation](.) for answers
+2. Review [existing issues](https://github.com/your-repo/issues)
+3. Create a new issue with detailed information
 
-1. **Check the examples** in `examples/README.md`
-2. **Review the architecture** in `ARCHITECTURE.md`
-3. **Read the complete guide** in `COMPLETE_USAGE_GUIDE.md`
-4. **Open an issue** for missing documentation
+## 📄 **License**
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ---
 
-**Happy coding with Groq Speech SDK!** 🎤✨
+**Built with ❤️ using Groq, Pyannote.audio, and modern web technologies.**

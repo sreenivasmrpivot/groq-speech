@@ -477,3 +477,121 @@ class SpeechConfig:
             return "cuda"
         else:
             return "cpu"
+    
+    @staticmethod
+    def create_for_recognition(model: Optional[str] = None, 
+                              target_language: str = "en",
+                              enable_timestamps: bool = False,
+                              enable_language_detection: bool = True) -> 'SpeechConfig':
+        """
+        Create a SpeechConfig optimized for speech recognition.
+        
+        This factory method creates a configuration specifically tuned for
+        speech recognition tasks, with appropriate defaults and settings.
+        
+        Args:
+            model: Groq model to use (default: None for auto-selection)
+            target_language: Target language for recognition (default: "en")
+            enable_timestamps: Whether to include timestamps in results (default: False)
+            enable_language_detection: Whether to enable automatic language detection (default: True)
+            
+        Returns:
+            Configured SpeechConfig instance for recognition
+        """
+        config = SpeechConfig()
+        
+        # Set model if provided
+        if model:
+            config.model = model
+        
+        # Enable language auto-detection by default for recognition
+        config.enable_language_detection = enable_language_detection
+        
+        # Set timestamps if requested
+        config.enable_timestamps = enable_timestamps
+        
+        # Note: Translation is disabled by default for recognition
+        config.enable_translation = False
+        
+        return config
+    
+    @staticmethod
+    def create_for_translation(model: Optional[str] = None,
+                              target_language: str = "en",
+                              enable_timestamps: bool = False,
+                              enable_language_detection: bool = True) -> 'SpeechConfig':
+        """
+        Create a SpeechConfig optimized for speech translation.
+        
+        This factory method creates a configuration specifically tuned for
+        speech translation tasks, with appropriate defaults and settings.
+        
+        Args:
+            model: Groq model to use (default: None for auto-selection)
+            target_language: Target language for translation (default: "en")
+            enable_timestamps: Whether to include timestamps in results (default: False)
+            enable_language_detection: Whether to enable automatic language detection (default: True)
+            
+        Returns:
+            Configured SpeechConfig instance for translation
+        """
+        config = SpeechConfig()
+        
+        # Set model if provided
+        if model:
+            config.model = model
+        
+        # Enable translation
+        config.enable_translation = True
+        config.set_translation_target_language(target_language)
+        
+        # Enable language auto-detection for translation
+        config.enable_language_detection = enable_language_detection
+        
+        # Set timestamps if requested
+        config.enable_timestamps = enable_timestamps
+        
+        return config
+    
+    @staticmethod
+    def create_for_diarization(model: Optional[str] = None,
+                              target_language: str = "en",
+                              enable_timestamps: bool = True,
+                              enable_language_detection: bool = True,
+                              is_translation: bool = False) -> 'SpeechConfig':
+        """
+        Create a SpeechConfig optimized for speaker diarization.
+        
+        This factory method creates a configuration specifically tuned for
+        speaker diarization tasks, with appropriate defaults and settings.
+        
+        Args:
+            model: Groq model to use (default: None for auto-selection)
+            target_language: Target language for processing (default: "en")
+            enable_timestamps: Whether to include timestamps in results (default: True)
+            enable_language_detection: Whether to enable automatic language detection (default: True)
+            is_translation: Whether this is for translation with diarization (default: False)
+            
+        Returns:
+            Configured SpeechConfig instance for diarization
+        """
+        config = SpeechConfig()
+        
+        # Set model if provided
+        if model:
+            config.model = model
+        
+        # Enable timestamps for diarization (usually needed for speaker segments)
+        config.enable_timestamps = enable_timestamps
+        
+        # Enable language auto-detection
+        config.enable_language_detection = enable_language_detection
+        
+        # Configure translation if requested
+        if is_translation:
+            config.enable_translation = True
+            config.set_translation_target_language(target_language)
+        else:
+            config.enable_translation = False
+        
+        return config

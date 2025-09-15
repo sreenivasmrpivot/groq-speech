@@ -63,6 +63,7 @@ from .speech_config import SpeechConfig
 from .speech_recognizer import SpeechRecognizer, SpeechRecognitionResult
 from .result_reason import ResultReason, CancellationReason
 from .speaker_diarization import DiarizationConfig, SpeakerSegment, DiarizationResult, Diarizer
+from .audio_utils import AudioFormatUtils
 from .exceptions import (
     GroqSpeechException,
     ConfigurationError,
@@ -87,6 +88,7 @@ __all__ = [
     "SpeakerSegment",  # Individual speaker segment
     "DiarizationResult",  # Complete diarization result
     "Diarizer",  # Simplified diarizer (replaces SpeakerDiarizer and EnhancedDiarizer)
+    "AudioFormatUtils",  # Audio format conversion utilities
     # Exception classes
     "GroqSpeechException",  # Base exception
     "ConfigurationError",  # Configuration errors

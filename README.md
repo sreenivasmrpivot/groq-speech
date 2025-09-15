@@ -1,381 +1,270 @@
 # Groq Speech SDK
 
-A comprehensive Python SDK for Groq's AI-powered speech recognition and translation services, featuring **real-time processing, speaker diarization, and web interface support**.
+A comprehensive speech recognition and translation SDK with speaker diarization capabilities, featuring both CLI and web interfaces.
 
-## 🚀 Quick Start
+## 🚀 **Quick Start**
 
-### Installation
+### **Prerequisites**
+- Python 3.8+
+- Node.js 18+ (for web UI)
+- Groq API key
+- Hugging Face token (for diarization)
+
+### **Installation**
+
+1. **Clone the repository:**
 ```bash
-# Clone the repository
 git clone <repository-url>
 cd groq-speech
+```
 
-# Install dependencies
+2. **Install Python dependencies:**
+```bash
 pip install -r requirements.txt
 ```
 
-### Basic Usage
-```python
-from groq_speech import SpeechRecognizer, SpeechConfig
-
-# Configure speech recognition
-config = SpeechConfig()
-recognizer = SpeechRecognizer(config)
-
-# File recognition (async)
-result = await recognizer.recognize_file("audio.wav")
-print(f"Recognized: {result.text}")
-
-# Translation (async)
-result = await recognizer.translate_file("audio.wav")
-print(f"Translated: {result.text}")
-
-# With speaker diarization (async)
-result = await recognizer.recognize_file("audio.wav", enable_diarization=True)
-if hasattr(result, 'segments'):
-    for segment in result.segments:
-        print(f"Speaker {segment.speaker_id}: {segment.text}")
+3. **Install frontend dependencies:**
+```bash
+cd examples/groq-speech-ui
+npm install
 ```
 
-### Command Line Interface
+4. **Configure environment:**
 ```bash
-# File-based transcription (SDK handles all complexity internally)
+cp groq_speech/env.template groq_speech/.env
+# Edit groq_speech/.env with your API keys
+```
+
+### **Usage**
+
+#### **CLI Interface (Direct SDK Access)**
+```bash
+# File transcription
 python examples/speech_demo.py --file audio.wav
 
-# File-based translation with diarization
-python examples/speech_demo.py --file audio.wav --operation translation --diarize
+# File transcription with diarization
+python examples/speech_demo.py --file audio.wav --diarize
 
 # Microphone single mode
 python examples/speech_demo.py --microphone-mode single
 
-# Microphone continuous mode
+# Microphone continuous mode with diarization
 python examples/speech_demo.py --microphone-mode continuous --diarize
+
+# Translation mode
+python examples/speech_demo.py --file audio.wav --operation translation --diarize
 ```
 
-**Key Benefits:**
-- **54% fewer lines of code** compared to complex implementations
-- **No fallback logic** - SDK handles everything internally
-- **No manual audio preprocessing** - AudioProcessor handles it automatically
-- **Simple API calls** - Just call `recognizer.recognize_file()` or `recognizer.translate_file()`
-
-## ✨ Features
-
-### Core Capabilities
-- **Real-time Speech Recognition**: High-quality transcription using Groq's AI models
-- **Speech Translation**: Automatic translation to English from any language
-- **Speaker Diarization**: Multi-speaker detection and separation using Pyannote.audio
-- **Voice Activity Detection**: Intelligent silence detection and audio segmentation
-- **Web Interface**: Modern React-based UI for easy testing and demonstration
-- **REST API**: FastAPI backend with REST endpoints
-
-### Audio Processing
-- **Microphone Input**: Real-time audio capture with configurable parameters
-- **File Processing**: Support for various audio formats (WAV, MP3, etc.)
-- **Audio Optimization**: Automatic resampling, chunking, and format conversion
-- **Continuous Processing**: Real-time streaming with intelligent chunking
-
-### Web Interface
-- **Modern UI**: React-based interface with real-time feedback
-- **Multiple Modes**: File upload, microphone recording, continuous processing
-- **Real-time Results**: REST API-based processing for continuous recognition
-- **Performance Metrics**: Live timing and performance monitoring
-
-## 🏗️ Architecture
-
-The SDK follows a **3-layer architecture with parallel client interfaces**:
-
-### Layer 1: Core SDK (`groq_speech/`)
-- **SpeechRecognizer**: Main orchestrator for all speech operations
-- **SpeakerDiarization**: Speaker diarization using Pyannote.audio
-- **VADService**: Voice Activity Detection and audio chunking
-- **SpeechConfig**: Configuration management
-
-### Layer 2: Client Interfaces (Parallel)
-- **CLI Client** (`speech_demo.py`): Command-line interface
-- **API Client** (`api/server.py`): FastAPI REST server
-
-### Layer 3: Web Interface (`groq-speech-ui/`)
-- **React Frontend**: Modern web interface with real-time processing
-- **REST API Integration**: Real-time processing for continuous recognition
-
-### Key Design Principles
-- **Single Responsibility**: Each component has one clear purpose
-- **Dependency Injection**: Services are injected for better testability
-- **Event-Driven**: Real-time callbacks and event handling
-- **SOLID Principles**: Clean, maintainable, and extensible code
-
-## 📖 Usage Examples
-
-### File Processing
-
-#### Basic Recognition
-```python
-from groq_speech import SpeechRecognizer, SpeechConfig
-
-config = SpeechConfig()
-recognizer = SpeechRecognizer(config)
-
-# Simple file recognition
-result = recognizer.recognize_file("audio.wav")
-print(f"Recognized: {result.text}")
-```
-
-#### Recognition with Diarization
-```python
-# File recognition with speaker diarization
-result = recognizer.recognize_file("audio.wav", enable_diarization=True)
-
-if hasattr(result, "segments"):
-    print(f"Speakers detected: {result.num_speakers}")
-    for segment in result.segments:
-        print(f"Speaker {segment.speaker_id}: {segment.text}")
-```
-
-#### Translation
-```python
-# File translation
-result = recognizer.translate_file("audio.wav")
-print(f"Translated: {result.text}")
-
-# Translation with diarization
-result = recognizer.translate_file("audio.wav", enable_diarization=True)
-if hasattr(result, "segments"):
-    for segment in result.segments:
-        print(f"Speaker {segment.speaker_id}: {segment.text}")
-```
-
-### Microphone Processing
-
-#### Single Recording
-```python
-# Record and process audio data
-import pyaudio
-import numpy as np
-
-# Record audio (example with PyAudio)
-p = pyaudio.PyAudio()
-stream = p.open(format=pyaudio.paFloat32, channels=1, rate=16000, input=True)
-audio_data = stream.read(16000)  # 1 second
-stream.close()
-p.terminate()
-
-# Convert to numpy array
-audio_array = np.frombuffer(audio_data, dtype=np.float32)
-
-# Process with recognizer
-result = recognizer.recognize_audio_data(audio_array)
-print(f"Recognized: {result.text}")
-
-# Translation
-result = recognizer.recognize_audio_data(audio_array, is_translation=True)
-print(f"Translated: {result.text}")
-```
-
-#### Continuous Recognition (Web Interface)
-The web interface provides continuous recognition through REST API calls:
-- Real-time audio streaming
-- Automatic chunking and processing
-- Live results display
-- Performance metrics
-
-### Raw Audio Data Processing
-
-```python
-import soundfile as sf
-
-# Load audio file
-audio_data, sample_rate = sf.read("audio.wav")
-
-# Process raw audio
-result = recognizer.recognize_audio_data(audio_data)
-print(f"Recognized: {result.text}")
-
-# Translate raw audio
-result = recognizer.translate_audio_data(audio_data)
-print(f"Translated: {result.text}")
-```
-
-## 🌐 Web Interface
-
-### Quick Start
+#### **Web Interface (REST API)**
 ```bash
-# Start the backend API server
-python -m api.server
+# Start API server
+cd api && python server.py
 
-# In another terminal, start the frontend
-cd examples/groq-speech-ui
-npm install
-npm run dev
+# Start frontend (in another terminal)
+cd examples/groq-speech-ui && npm run dev
+
+# Open http://localhost:3000
 ```
 
-### Features
-- **File Upload**: Drag and drop audio files for processing
-- **Microphone Recording**: Real-time audio capture and processing
-- **Continuous Mode**: Stream processing with REST API
-- **Speaker Diarization**: Visual speaker separation and attribution
-- **Performance Metrics**: Real-time timing and performance data
-- **Multiple Languages**: Support for transcription and translation
+## 🏗️ **Architecture**
 
-### API Endpoints
+### **3-Layer Architecture**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Layer 3: User Interfaces                │
+├─────────────────────────────────────────────────────────────┤
+│  CLI Client (speech_demo.py)  │  Web UI (groq-speech-ui)   │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Layer 2: API Layer                      │
+├─────────────────────────────────────────────────────────────┤
+│                    FastAPI Server (api/)                   │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Layer 1: Core SDK                       │
+├─────────────────────────────────────────────────────────────┤
+│              groq_speech/ (Python SDK)                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### **Key Components**
+
+#### **Core SDK (`groq_speech/`)**
+- **`speech_recognizer.py`** - Main orchestrator, handles all speech processing
+- **`speech_config.py`** - Configuration management with factory methods
+- **`speaker_diarization.py`** - Speaker diarization using Pyannote.audio
+- **`vad_service.py`** - Voice Activity Detection service
+- **`audio_utils.py`** - Audio format utilities and conversion
+- **`exceptions.py`** - Custom exception classes
+- **`result_reason.py`** - Result status enums
+
+#### **API Server (`api/`)**
+- **`server.py`** - FastAPI server with REST endpoints only
+- **`models/`** - Pydantic request/response models
+- **REST API** - HTTP endpoints for all operations
+
+#### **Frontend (`examples/groq-speech-ui/`)**
+- **`EnhancedSpeechDemo.tsx`** - Main UI component with all features
+- **`audio-recorder.ts`** - Unified audio recording (standard + optimized)
+- **`continuous-audio-recorder.ts`** - VAD-based continuous recording
+- **`client-vad-service.ts`** - Client-side Voice Activity Detection
+- **`audio-converter.ts`** - Unified audio conversion (standard + optimized)
+- **`groq-api.ts`** - REST API client
+
+## 🔄 **Data Flow**
+
+### **CLI Flow (Direct Access)**
+```
+Audio Input → numpy array → SDK Processing → Console Output
+```
+
+### **Web UI Flow (REST API)**
+```
+Audio Input → Frontend Processing → HTTP REST → API Server → SDK Processing → JSON Response → UI Display
+```
+
+### **Audio Format Handling**
+- **File Processing**: Base64-encoded WAV → HTTP REST → base64 decode → numpy array
+- **Microphone Processing**: Float32Array → HTTP REST → array conversion → numpy array
+- **VAD Processing**: Client-side for real-time performance
+
+## 🎯 **Features**
+
+### **Speech Recognition**
+- ✅ File-based transcription
+- ✅ Microphone single mode
+- ✅ Microphone continuous mode with VAD
+- ✅ Real-time audio level visualization
+- ✅ Silence detection and chunking
+
+### **Translation**
+- ✅ File-based translation
+- ✅ Microphone translation
+- ✅ Multi-language support
+- ✅ Target language configuration
+
+### **Speaker Diarization**
+- ✅ Pyannote.audio integration
+- ✅ GPU acceleration support
+- ✅ Multi-speaker detection
+- ✅ Speaker-specific segments
+
+### **Voice Activity Detection (VAD)**
+- ✅ Client-side real-time processing
+- ✅ 15-second silence detection
+- ✅ Audio level visualization
+- ✅ Automatic chunk creation
+
+### **Performance Optimizations**
+- ✅ Unified audio recorders (standard + optimized)
+- ✅ Unified audio converters (standard + optimized)
+- ✅ Client-side VAD for real-time processing
+- ✅ Chunked processing for large files
+- ✅ Memory-efficient operations
+
+## 🔌 **API Endpoints**
+
+### **Core Endpoints**
 - `POST /api/v1/recognize` - File transcription
 - `POST /api/v1/translate` - File translation
 - `POST /api/v1/recognize-microphone` - Single microphone processing
 - `POST /api/v1/recognize-microphone-continuous` - Continuous microphone processing
+
+### **Utility Endpoints**
 - `GET /health` - Health check
+- `GET /api/v1/models` - Available models
+- `GET /api/v1/languages` - Supported languages
+- `POST /api/log` - Frontend logging
 
-## 🚀 Deployment
+### **VAD Endpoints (Legacy)**
+- `POST /api/v1/vad/should-create-chunk` - VAD chunk detection
+- `POST /api/v1/vad/audio-level` - Audio level analysis
 
-### Local Development with Docker
+## 🐳 **Deployment**
+
+### **Docker (Local Development)**
 ```bash
-# CPU-only development
-cd deployment/docker
-docker-compose up --build
+# Standard deployment
+docker-compose -f deployment/docker/docker-compose.yml up
 
-# GPU-enabled development
-docker-compose -f docker-compose.gpu.yml up --build
+# GPU-enabled deployment
+docker-compose -f deployment/docker/docker-compose.gpu.yml up
+
+# Development with hot reload
+docker-compose -f deployment/docker/docker-compose.dev.yml up
 ```
 
-### GCP CloudRun with GPU Support
+### **GCP Cloud Run (Production)**
 ```bash
-# Set environment variables
-export PROJECT_ID="your-gcp-project-id"
-export GROQ_API_KEY="your-groq-api-key"
-export HF_TOKEN="your-huggingface-token"
-
-# Deploy with GPU support
+# Deploy to Cloud Run with GPU support
 cd deployment/gcp
 ./deploy.sh
 ```
 
-### Deployment Features
-- **GPU Support**: Automatic CUDA detection and optimization
-- **Auto-scaling**: CloudRun auto-scaling based on demand
-- **Health Monitoring**: Built-in health checks and monitoring
-- **Security**: GCP Secret Manager integration
-- **Performance**: Optimized for diarization workloads
+## 📊 **Performance**
 
-For detailed deployment instructions, see [deployment/README.md](deployment/README.md).
+### **CLI Performance**
+- **Direct SDK access** - No network overhead
+- **Real-time VAD** - Local processing
+- **Memory efficient** - Direct numpy array handling
 
-## ⚙️ Configuration
+### **Web UI Performance**
+- **Client-side VAD** - Real-time silence detection
+- **Unified components** - Optimized for both short and long audio
+- **Chunked processing** - Handles large files efficiently
+- **REST API** - Scalable and maintainable
 
-### Environment Variables
+## 🔧 **Configuration**
+
+### **Environment Variables**
 ```bash
 # Required
-export GROQ_API_KEY="your-api-key-here"
+GROQ_API_KEY=your_groq_api_key
 
 # Optional (for diarization)
-export HF_TOKEN="your-huggingface-token"
+HF_TOKEN=your_huggingface_token
+
+# Optional (for GPU support)
+CUDA_VISIBLE_DEVICES=0
 ```
 
-### SpeechConfig
-```python
-from groq_speech import SpeechConfig
+### **Audio Settings**
+- **Sample Rate**: 16kHz (standard)
+- **Channels**: Mono (1 channel)
+- **Format**: Float32Array (microphone), WAV (files)
+- **VAD Threshold**: 0.003 RMS (conservative detection)
 
-config = SpeechConfig()
-config.api_key = "your-api-key"
-config.enable_translation = True
-config.set_translation_target_language("en")
-```
+## 📚 **Documentation**
 
-## 📊 Performance
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - Detailed system architecture
+- **[API Reference](groq_speech/API_REFERENCE.md)** - SDK API documentation
+- **[Deployment Guide](deployment/README.md)** - Deployment instructions
+- **[Code Analysis](docs/CODE_ANALYSIS.md)** - Detailed code analysis
 
-### Processing Modes
-- **File Processing**: Batch processing with automatic chunking
-- **Real-time Processing**: REST API-based processing with low latency
-- **Diarization**: Pyannote.audio-based speaker detection and separation
-- **Voice Activity Detection**: Intelligent silence detection and audio segmentation
-
-### Optimization Features
-- **Intelligent Chunking**: Automatic audio segmentation for optimal processing
-- **Voice Activity Detection**: Skip silent segments to improve efficiency
-- **REST API Streaming**: Real-time processing with minimal latency
-- **Error Handling**: Automatic retry and graceful degradation
-
-## 🚨 Error Handling
-
-### Exception Hierarchy
-```python
-from groq_speech.exceptions import (
-    GroqSpeechException,
-    ConfigurationError,
-    APIError,
-    AudioError,
-    DiarizationError
-)
-
-try:
-    result = recognizer.recognize_file("audio.wav")
-except APIError as e:
-    print(f"API Error: {e}")
-except AudioError as e:
-    print(f"Audio Error: {e}")
-```
-
-### Fallback Mechanisms
-- **Diarization Fallback**: Falls back to basic transcription if diarization fails
-- **API Retry**: Automatic retry for transient API errors
-- **Audio Processing**: Graceful handling of audio format issues
-
-## 🔧 Command Line Interface
-
-The SDK includes a command-line interface for testing and demonstration:
-
-```bash
-# File recognition
-python examples/speech_demo.py --file audio.wav
-
-# File recognition with diarization
-python examples/speech_demo.py --file audio.wav --diarize
-
-# File translation
-python examples/speech_demo.py --file audio.wav --operation translation
-
-# Microphone recognition
-python examples/speech_demo.py --microphone-mode single
-
-# Microphone translation
-python examples/speech_demo.py --microphone-mode single --operation translation
-
-# Continuous recognition
-python examples/speech_demo.py --microphone-mode continuous
-```
-
-## 📚 Documentation
-
-### Architecture & Technical Details
-- [Architecture Overview](docs/ARCHITECTURE.md) - Complete system architecture with Mermaid diagrams
-- [Code Analysis](docs/CODE_ANALYSIS.md) - Detailed code analysis and implementation patterns
-- [API Reference](groq_speech/API_REFERENCE.md) - Complete API reference
-
-### Web Interface
-- [Frontend README](examples/groq-speech-ui/README.md) - Web interface documentation
-- [Backend Setup](examples/groq-speech-ui/BACKEND_SETUP.md) - Backend configuration guide
-
-### Development & Testing
-- [Contributing Guide](docs/CONTRIBUTING.md) - Development guidelines and standards
-- [Changelog](docs/CHANGELOG.md) - Version history and changes
-- [Debugging Guide](docs/DEBUGGING_GUIDE.md) - Comprehensive debugging instructions
-- [API Testing Guide](docs/POSTMAN_TESTING_GUIDE.md) - API testing with Postman
-- [API Status Report](docs/API_STATUS_REPORT.md) - Current API status and capabilities
-
-### Deployment
-- [Deployment Guide](deployment/README.md) - Docker and GCP CloudRun deployment instructions
-
-## 🤝 Contributing
+## 🤝 **Contributing**
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Add tests
+4. Add tests if applicable
 5. Submit a pull request
 
-## 📄 License
+## 📄 **License**
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🆘 Support
+## 🆘 **Support**
 
-For support and questions:
-- Create an issue on GitHub
-- Check the documentation
-- Review the examples in the `examples/` directory
+For issues and questions:
+1. Check the [documentation](docs/)
+2. Review [existing issues](https://github.com/your-repo/issues)
+3. Create a new issue with detailed information
+
+---
+
+**Built with ❤️ using Groq, Pyannote.audio, and modern web technologies.**

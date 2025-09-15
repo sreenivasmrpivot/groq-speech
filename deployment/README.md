@@ -1,201 +1,440 @@
-# Groq Speech SDK Deployment Guide
+# Groq Speech SDK - Deployment Guide
 
-This guide covers deploying the Groq Speech SDK API server with GPU support for optimal performance.
+## 🚀 **Deployment Options**
 
-## Prerequisites
+The Groq Speech SDK supports multiple deployment options:
 
-### Local Development
-- Docker and Docker Compose
-- Python 3.8+
-- Node.js 18+
+1. **Local Development** - Docker Compose with hot reload
+2. **Production** - Docker containers with GPU support
+3. **Cloud Run** - GCP Cloud Run with GPU acceleration
 
-### GCP CloudRun Deployment
-- Google Cloud SDK (`gcloud`)
-- GCP project with billing enabled
-- Required APIs enabled (Cloud Build, Cloud Run, Container Registry)
+## 🐳 **Docker Deployment**
 
-## Local Development with Docker
+### **Prerequisites**
+- Docker and Docker Compose installed
+- NVIDIA Docker runtime (for GPU support)
+- Groq API key and Hugging Face token
 
-### CPU-only Development
+### **Environment Setup**
 ```bash
-# Build and run the API server
-cd deployment/docker
-docker-compose up --build
+# Copy environment template
+cp groq_speech/env.template groq_speech/.env
 
-# The API will be available at http://localhost:8000
+# Edit with your API keys
+GROQ_API_KEY=your_groq_api_key
+HF_TOKEN=your_huggingface_token
 ```
 
-### GPU-enabled Development
+### **1. Standard Deployment**
 ```bash
-# Build and run with GPU support
-cd deployment/docker
-docker-compose -f docker-compose.gpu.yml up --build
+# Start all services
+docker-compose -f deployment/docker/docker-compose.yml up
 
-# The API will be available at http://localhost:8000
+# Or run in background
+docker-compose -f deployment/docker/docker-compose.yml up -d
 ```
 
-### Frontend Development
+**Services:**
+- **API Server**: http://localhost:8000
+- **Frontend**: http://localhost:3000
+- **Health Check**: http://localhost:8000/health
+
+### **2. GPU-Enabled Deployment**
 ```bash
-# In a separate terminal
+# Start with GPU support
+docker-compose -f deployment/docker/docker-compose.gpu.yml up
+
+# Check GPU availability
+docker-compose -f deployment/docker/docker-compose.gpu.yml exec api python test_gpu_support.py
+```
+
+**GPU Features:**
+- **Pyannote.audio**: CUDA acceleration for diarization
+- **Automatic Detection**: Falls back to CPU if GPU unavailable
+- **Memory Optimization**: Efficient GPU memory usage
+
+### **3. Development Deployment**
+```bash
+# Start with hot reload
+docker-compose -f deployment/docker/docker-compose.dev.yml up
+
+# Frontend hot reload enabled
+# API server restarts on code changes
+```
+
+**Development Features:**
+- **Hot Reload**: Code changes trigger automatic restarts
+- **Volume Mounts**: Local code changes reflected immediately
+- **Debug Mode**: Enhanced logging and error reporting
+
+## ☁️ **GCP Cloud Run Deployment**
+
+### **Prerequisites**
+- Google Cloud SDK installed
+- GCP project with Cloud Run API enabled
+- Docker registry access (Artifact Registry)
+
+### **1. Build and Push Images**
+```bash
+# Build API server image
+docker build -f deployment/docker/Dockerfile.gpu -t gcr.io/PROJECT_ID/groq-speech-api .
+
+# Build frontend image
 cd examples/groq-speech-ui
-npm install
-npm run dev
+docker build -t gcr.io/PROJECT_ID/groq-speech-ui .
 
-# The UI will be available at http://localhost:3000
+# Push to registry
+docker push gcr.io/PROJECT_ID/groq-speech-api
+docker push gcr.io/PROJECT_ID/groq-speech-ui
 ```
 
-## GCP CloudRun Deployment
-
-### 1. Set Environment Variables
+### **2. Deploy to Cloud Run**
 ```bash
-export PROJECT_ID="your-gcp-project-id"
-export GROQ_API_KEY="your-groq-api-key"
-export HF_TOKEN="your-huggingface-token"
-```
-
-### 2. Deploy with GPU Support
-```bash
-cd deployment/gcp
-./deploy.sh
-```
-
-### 3. Manual Deployment (Alternative)
-```bash
-# Build the image
-gcloud builds submit --tag gcr.io/${PROJECT_ID}/groq-speech-api --file deployment/docker/Dockerfile.gpu .
-
-# Deploy to CloudRun
+# Deploy API server
 gcloud run deploy groq-speech-api \
-    --image gcr.io/${PROJECT_ID}/groq-speech-api \
-    --platform managed \
-    --region us-central1 \
-    --allow-unauthenticated \
-    --port 8000 \
-    --memory 16Gi \
-    --cpu 4 \
-    --gpu-type nvidia-t4 \
-    --gpu-count 1 \
-    --timeout 3600 \
-    --concurrency 1 \
-    --max-instances 10 \
-    --min-instances 0
+  --image gcr.io/PROJECT_ID/groq-speech-api \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 4Gi \
+  --cpu 2 \
+  --gpu 1 \
+  --gpu-type nvidia-tesla-t4
+
+# Deploy frontend
+gcloud run deploy groq-speech-ui \
+  --image gcr.io/PROJECT_ID/groq-speech-ui \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 1Gi \
+  --cpu 1
 ```
 
-## GPU Support Configuration
-
-The deployment automatically detects and configures GPU support for Pyannote.audio:
-
-- **CUDA Detection**: Automatically detects available CUDA devices
-- **Device Selection**: Uses GPU if available, falls back to CPU
-- **Memory Management**: Optimized for CloudRun's GPU memory limits
-- **Performance**: Significantly faster diarization processing
-
-### GPU Requirements
-- **CloudRun**: NVIDIA T4 GPU (recommended)
-- **Local**: NVIDIA GPU with CUDA 11.8+ support
-- **Memory**: Minimum 4GB GPU memory for diarization
-
-## Environment Variables
-
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `GROQ_API_KEY` | Groq API key for speech recognition | Yes | - |
-| `HF_TOKEN` | Hugging Face token for Pyannote.audio | Yes | - |
-| `CUDA_VISIBLE_DEVICES` | GPU device selection | No | `0` |
-| `LOG_LEVEL` | Logging level | No | `INFO` |
-
-## Monitoring and Logs
-
-### View Logs
+### **3. Configure Environment Variables**
 ```bash
-# CloudRun logs
-gcloud logs read --service=groq-speech-api --limit=50
+# Set API server environment
+gcloud run services update groq-speech-api \
+  --set-env-vars GROQ_API_KEY=your_groq_api_key,HF_TOKEN=your_huggingface_token
 
-# Docker logs
-docker-compose logs -f
+# Set frontend environment
+gcloud run services update groq-speech-ui \
+  --set-env-vars NEXT_PUBLIC_API_URL=https://groq-speech-api-xxx.run.app
 ```
 
-### Health Check
+## 🔧 **Configuration Options**
+
+### **Docker Compose Files**
+
+#### **`docker-compose.yml`** - Standard Production
+```yaml
+services:
+  api:
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
+  
+  frontend:
+    build:
+      context: ../../examples/groq-speech-ui
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8000
+    depends_on:
+      - api
+```
+
+#### **`docker-compose.gpu.yml`** - GPU-Enabled
+```yaml
+services:
+  api:
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile.gpu
+    ports:
+      - "8000:8000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+```
+
+#### **`docker-compose.dev.yml`** - Development
+```yaml
+services:
+  api:
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile.dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../api:/app/api
+      - ../../groq_speech:/app/groq_speech
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
+  
+  frontend:
+    build:
+      context: ../../examples/groq-speech-ui
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../../examples/groq-speech-ui/src:/app/src
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8000
+```
+
+### **Dockerfiles**
+
+#### **`Dockerfile`** - Standard API Server
+```dockerfile
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY groq_speech/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy API server
+COPY api/ ./api/
+COPY groq_speech/ ./groq_speech/
+
+# Set working directory
+WORKDIR /app/api
+
+# Expose port
+EXPOSE 8000
+
+# Start server
+CMD ["python", "server.py"]
+```
+
+#### **`Dockerfile.gpu`** - GPU-Enabled API Server
+```dockerfile
+FROM nvidia/cuda:11.8-runtime-ubuntu20.04
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY groq_speech/requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy API server and SDK
+COPY api/ ./api/
+COPY groq_speech/ ./groq_speech/
+COPY test_gpu_support.py ./
+
+# Set working directory
+WORKDIR /app/api
+
+# Expose port
+EXPOSE 8000
+
+# Start server
+CMD ["python3", "server.py"]
+```
+
+## 🔍 **Health Checks**
+
+### **API Server Health Check**
 ```bash
-curl https://your-service-url/health
+# Check API server status
+curl http://localhost:8000/health
+
+# Expected response
+{
+  "status": "healthy",
+  "timestamp": "2024-01-01T00:00:00Z",
+  "version": "1.0.0",
+  "services": {
+    "groq_api": "connected",
+    "hf_api": "connected"
+  }
+}
 ```
 
-### API Documentation
-Visit `https://your-service-url/docs` for interactive API documentation.
+### **Frontend Health Check**
+```bash
+# Check frontend status
+curl http://localhost:3000
 
-## Performance Optimization
+# Should return HTML page
+```
 
-### GPU Optimization
-- Use `nvidia-t4` GPU type for best price/performance
-- Set `concurrency=1` to avoid GPU memory conflicts
-- Monitor GPU utilization in CloudRun metrics
-
-### Memory Optimization
-- 16GB RAM recommended for diarization workloads
-- Adjust `max-instances` based on expected load
-- Use `min-instances=0` for cost optimization
-
-### Cost Optimization
-- Set appropriate `max-instances` limit
-- Use `min-instances=0` for auto-scaling
-- Monitor usage patterns and adjust accordingly
-
-## Troubleshooting
-
-### Common Issues
-
-1. **GPU Not Available**
-   - Check CloudRun region supports GPUs
-   - Verify GPU quota in GCP console
-   - Ensure proper GPU type selection
-
-2. **Memory Issues**
-   - Increase memory allocation
-   - Reduce concurrency settings
-   - Check for memory leaks in logs
-
-3. **API Timeouts**
-   - Increase timeout settings
-   - Check network connectivity
-   - Monitor processing times
-
-### Debug Commands
+### **GPU Support Check**
 ```bash
 # Check GPU availability
-nvidia-smi
+docker-compose exec api python test_gpu_support.py
 
-# Test API endpoints
-curl -X POST "https://your-service-url/api/v1/recognize" \
-  -H "Content-Type: application/json" \
-  -d '{"audio_data": [0.1, 0.2, 0.3], "sample_rate": 16000}'
-
-# View detailed logs
-gcloud logs read --service=groq-speech-api --severity=ERROR
+# Expected output
+✅ CUDA available: True
+✅ PyTorch CUDA: True
+✅ GPU count: 1
+✅ GPU name: NVIDIA GeForce RTX 4090
 ```
 
-## Security Considerations
+## 📊 **Monitoring and Logging**
 
-- Use GCP Secret Manager for sensitive data
-- Enable authentication if needed
-- Configure CORS properly for production
-- Monitor API usage and set rate limits
+### **API Server Logs**
+```bash
+# View API server logs
+docker-compose logs -f api
 
-## Scaling
+# View specific service logs
+docker-compose logs -f api | grep "ERROR"
+```
 
-### Horizontal Scaling
-- Adjust `max-instances` based on load
-- Use load balancing for multiple regions
-- Monitor costs and performance
+### **Frontend Logs**
+```bash
+# View frontend logs
+docker-compose logs -f frontend
 
-### Vertical Scaling
-- Increase memory/CPU allocation
-- Use more powerful GPU types
-- Optimize processing algorithms
+# View build logs
+docker-compose logs frontend | grep "build"
+```
 
-## Support
+### **Performance Monitoring**
+- **API Response Times**: Available in `/api/v1/status`
+- **GPU Usage**: Monitor with `nvidia-smi`
+- **Memory Usage**: Monitor with `docker stats`
 
-For issues and questions:
-- Check the logs first
-- Review this documentation
-- Test locally before deploying
-- Monitor CloudRun metrics and logs
+## 🚨 **Troubleshooting**
+
+### **Common Issues**
+
+#### **1. GPU Not Available**
+```bash
+# Check NVIDIA Docker runtime
+docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
+
+# If not available, install NVIDIA Docker runtime
+# https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+```
+
+#### **2. API Key Issues**
+```bash
+# Check environment variables
+docker-compose exec api env | grep GROQ_API_KEY
+
+# Verify API key format
+docker-compose exec api python -c "import os; print('API Key set:', bool(os.getenv('GROQ_API_KEY')))"
+```
+
+#### **3. Port Conflicts**
+```bash
+# Check port usage
+netstat -tulpn | grep :8000
+netstat -tulpn | grep :3000
+
+# Change ports in docker-compose.yml if needed
+```
+
+#### **4. Memory Issues**
+```bash
+# Check memory usage
+docker stats
+
+# Increase memory limits in docker-compose.yml
+services:
+  api:
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+```
+
+### **Debug Mode**
+```bash
+# Enable debug logging
+docker-compose -f deployment/docker/docker-compose.dev.yml up
+
+# Check detailed logs
+docker-compose logs -f api | grep "DEBUG"
+```
+
+## 🔄 **Updates and Maintenance**
+
+### **Update Images**
+```bash
+# Rebuild and restart
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+### **Update Environment Variables**
+```bash
+# Update .env file
+vim groq_speech/.env
+
+# Restart services
+docker-compose restart
+```
+
+### **Backup Configuration**
+```bash
+# Backup environment
+cp groq_speech/.env groq_speech/.env.backup
+
+# Backup Docker Compose files
+cp deployment/docker/docker-compose*.yml ./backup/
+```
+
+## 📈 **Scaling**
+
+### **Horizontal Scaling**
+```yaml
+# Scale API server
+services:
+  api:
+    deploy:
+      replicas: 3
+    ports:
+      - "8000-8002:8000"
+```
+
+### **Load Balancing**
+```yaml
+# Add load balancer
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - api
+```
+
+This deployment guide provides comprehensive instructions for deploying the Groq Speech SDK in various environments with proper configuration and monitoring.

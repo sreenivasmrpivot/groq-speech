@@ -1,479 +1,395 @@
-# Contributing to Groq Speech SDK
+# Groq Speech SDK - Contributing Guide
 
-Thank you for your interest in contributing to the Groq Speech SDK! This document provides guidelines and information for contributors.
+## 🤝 **Welcome Contributors!**
 
-## 🤝 **How to Contribute**
-
-### **Types of Contributions**
-
-We welcome contributions in the following areas:
-
-- **🐛 Bug Reports** - Help us identify and fix issues
-- **✨ Feature Requests** - Suggest new functionality
-- **📚 Documentation** - Improve guides and examples
-- **🧪 Tests** - Add test coverage and improve reliability
-- **🔧 Code Improvements** - Enhance performance and maintainability
-- **🌐 Translations** - Help with internationalization
-- **📖 Examples** - Create useful examples and tutorials
-
-### **Before You Start**
-
-1. **Check Existing Issues** - Search for similar issues before creating new ones
-2. **Read Documentation** - Familiarize yourself with the project structure
-3. **Join Discussions** - Participate in GitHub discussions
-4. **Follow Guidelines** - Read this guide thoroughly
+Thank you for your interest in contributing to the Groq Speech SDK! This guide will help you get started with development and ensure your contributions align with our project standards.
 
 ## 🚀 **Quick Start**
 
-### **1. Fork and Clone**
+### **Prerequisites**
+- Python 3.8+
+- Node.js 18+
+- Git
+- Docker (optional, for testing)
 
+### **Development Setup**
 ```bash
-# Fork the repository on GitHub
-# Then clone your fork
-git clone https://github.com/YOUR_USERNAME/groq-speech-sdk.git
-cd groq-speech-sdk
+# Fork and clone the repository
+git clone https://github.com/your-username/groq-speech.git
+cd groq-speech
 
-# Add upstream remote
-git remote add upstream https://github.com/groq/groq-speech-sdk.git
-```
-
-### **2. Set Up Development Environment**
-
-```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install development dependencies
-make dev-setup
-
-# Or manually:
+# Install Python dependencies
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
-pip install -e .
-pre-commit install
+
+# Install frontend dependencies
+cd examples/groq-speech-ui
+npm install
+
+# Configure environment
+cp groq_speech/env.template groq_speech/.env
+# Edit groq_speech/.env with your API keys
 ```
 
-### **3. Create a Branch**
+## 📋 **Development Workflow**
 
+### **1. Create a Feature Branch**
 ```bash
-# Create a feature branch
 git checkout -b feature/your-feature-name
-
-# Or for bug fixes
-git checkout -b fix/your-bug-description
+# or
+git checkout -b fix/your-bug-fix
 ```
 
-### **4. Make Your Changes**
-
-- Write your code following our [coding standards](#coding-standards)
-- Add tests for new functionality
+### **2. Make Your Changes**
+- Follow the coding standards
+- Add tests for new features
 - Update documentation as needed
-- Ensure all tests pass
 
-### **5. Test Your Changes**
-
+### **3. Test Your Changes**
 ```bash
-# Run all tests
-make test
+# Run Python tests
+python -m pytest tests/
 
-# Run specific test categories
-make test-unit
-make test-integration
-make test-e2e
+# Run frontend tests
+cd examples/groq-speech-ui
+npm test
 
-# Run code quality checks
-make quality
-
-# Run with coverage
-make test-coverage
+# Run integration tests
+python examples/speech_demo.py --file test.wav
 ```
 
-### **6. Submit Your Contribution**
-
+### **4. Commit Your Changes**
 ```bash
-# Commit your changes
 git add .
 git commit -m "feat: add new feature description"
-
-# Push to your fork
-git push origin feature/your-feature-name
-
-# Create a Pull Request on GitHub
+# or
+git commit -m "fix: resolve issue description"
 ```
 
-## 📋 **Issue Guidelines**
+### **5. Push and Create Pull Request**
+```bash
+git push origin feature/your-feature-name
+# Create PR on GitHub
+```
 
-### **Bug Reports**
+## 🎯 **Contribution Areas**
 
-When reporting bugs, please include:
+### **Core SDK (`groq_speech/`)**
+- **Speech Recognition**: Improve accuracy and performance
+- **Translation**: Add new language support
+- **Diarization**: Enhance speaker detection
+- **VAD**: Improve silence detection algorithms
+- **Audio Processing**: Optimize format handling
 
-- **Clear Description** - What happened vs. what you expected
-- **Reproduction Steps** - Step-by-step instructions
-- **Environment Details** - OS, Python version, dependencies
-- **Error Messages** - Full error traceback
-- **Code Example** - Minimal code to reproduce the issue
+### **API Server (`api/`)**
+- **New Endpoints**: Add new API functionality
+- **Performance**: Optimize response times
+- **Error Handling**: Improve error responses
+- **Monitoring**: Add health checks and metrics
 
-**Template:**
+### **Frontend (`examples/groq-speech-ui/`)**
+- **UI Components**: Improve user interface
+- **Audio Processing**: Enhance client-side processing
+- **Performance**: Optimize rendering and processing
+- **Accessibility**: Improve accessibility features
+
+### **Documentation**
+- **API Documentation**: Update API references
+- **User Guides**: Improve user documentation
+- **Code Comments**: Add inline documentation
+- **Examples**: Create usage examples
+
+## 📝 **Coding Standards**
+
+### **Python Code**
+```python
+# Use type hints
+def process_audio(audio_data: np.ndarray, sample_rate: int) -> RecognitionResult:
+    """Process audio data with comprehensive docstring.
+    
+    Args:
+        audio_data: Audio data as numpy array
+        sample_rate: Sample rate in Hz
+        
+    Returns:
+        RecognitionResult: Processed recognition result
+        
+    Raises:
+        AudioProcessingError: If audio processing fails
+    """
+    pass
+
+# Use meaningful variable names
+audio_level = calculate_rms(audio_data)
+silence_threshold = 0.003
+
+# Use constants for magic numbers
+SILENCE_THRESHOLD = 0.003
+REQUIRED_SILENCE_SECONDS = 15.0
+```
+
+### **TypeScript/React Code**
+```typescript
+// Use TypeScript interfaces
+interface AudioRecorderConfig {
+  sampleRate: number;
+  chunkSize: number;
+  onChunkProcessed: (audioData: Float32Array) => Promise<void>;
+}
+
+// Use meaningful function names
+const processAudioChunk = async (audioData: Float32Array): Promise<void> => {
+  // Implementation
+};
+
+// Use proper error handling
+try {
+  const result = await processAudio(audioData);
+  return result;
+} catch (error) {
+  console.error('Audio processing failed:', error);
+  throw new Error(`Audio processing failed: ${error.message}`);
+}
+```
+
+### **Documentation**
 ```markdown
-## Bug Report
+# Use clear headings
+## Feature Name
 
 ### Description
-[Clear description of the bug]
+Brief description of the feature.
 
-### Steps to Reproduce
-1. [Step 1]
-2. [Step 2]
-3. [Step 3]
-
-### Expected Behavior
-[What you expected to happen]
-
-### Actual Behavior
-[What actually happened]
-
-### Environment
-- OS: [e.g., macOS 12.0]
-- Python: [e.g., 3.11.0]
-- SDK Version: [e.g., 1.0.0]
-
-### Error Messages
-```
-[Full error traceback]
-```
-
-### Code Example
+### Usage
 ```python
-# Minimal code to reproduce
+# Code examples
+result = process_audio(audio_data)
 ```
 
-### Additional Context
-[Any other relevant information]
+### Parameters
+- `audio_data`: Description of parameter
+- `sample_rate`: Description of parameter
+
+### Returns
+Description of return value
 ```
-
-### **Feature Requests**
-
-When requesting features, please include:
-
-- **Use Case** - Why this feature is needed
-- **Proposed Solution** - How you think it should work
-- **Alternatives Considered** - Other approaches you've thought about
-- **Impact** - Who would benefit from this feature
-
-## 💻 **Coding Standards**
-
-### **Python Code Style**
-
-We follow [PEP 8](https://www.python.org/dev/peps/pep-0008/) with some modifications:
-
-- **Line Length**: 100 characters maximum
-- **Import Order**: Standard library, third-party, local
-- **Type Hints**: Required for all public functions
-- **Docstrings**: Google style for all public functions
-
-### **Code Quality Tools**
-
-We use several tools to maintain code quality:
-
-```bash
-# Format code
-make format
-
-# Check formatting
-make format-check
-
-# Run linting
-make lint
-
-# Type checking
-make type-check
-
-# Run all quality checks
-make quality
-```
-
-### **Pre-commit Hooks**
-
-We use pre-commit hooks to ensure code quality:
-
-```bash
-# Install pre-commit hooks
-pre-commit install
-
-# Run hooks manually
-pre-commit run --all-files
-```
-
-### **Code Review Checklist**
-
-Before submitting a PR, ensure:
-
-- [ ] Code follows style guidelines
-- [ ] All tests pass
-- [ ] New functionality has tests
-- [ ] Documentation is updated
-- [ ] Type hints are included
-- [ ] No security issues introduced
-- [ ] Performance impact considered
 
 ## 🧪 **Testing Guidelines**
 
-### **Test Structure**
-
-```
-tests/
-├── unit/              # Unit tests
-├── integration/       # Integration tests
-├── e2e/              # End-to-end tests
-├── performance/       # Performance tests
-└── fixtures/         # Test data
-```
-
-### **Writing Tests**
-
-- **Unit Tests**: Test individual functions/methods
-- **Integration Tests**: Test component interactions
-- **E2E Tests**: Test complete workflows
-- **Performance Tests**: Test performance characteristics
-
-### **Test Naming**
-
+### **Python Tests**
 ```python
-# Good test names
-def test_speech_config_initialization():
-    """Test SpeechConfig initialization with valid parameters."""
+import pytest
+from groq_speech.speech_recognizer import SpeechRecognizer
+from groq_speech.speech_config import SpeechConfig
 
-def test_audio_config_with_invalid_device():
-    """Test AudioConfig with invalid device ID raises exception."""
-
-def test_recognition_with_german_language():
-    """Test speech recognition with German language setting."""
-```
-
-### **Test Coverage**
-
-- **Minimum Coverage**: 90% for new code
-- **Critical Paths**: 100% coverage required
-- **Edge Cases**: Include boundary conditions
-- **Error Scenarios**: Test error handling
-
-## 📚 **Documentation Standards**
-
-### **Docstring Format**
-
-```python
-def recognize_speech(audio_data: bytes, language: str = "en-US") -> RecognitionResult:
-    """Recognize speech from audio data.
+class TestSpeechRecognizer:
+    def test_audio_processing(self):
+        """Test audio processing functionality."""
+        config = SpeechConfig()
+        recognizer = SpeechRecognizer(config)
+        
+        # Test with sample audio data
+        audio_data = np.array([0.1, 0.2, 0.3])
+        result = recognizer.process_audio(audio_data, 16000)
+        
+        assert result is not None
+        assert hasattr(result, 'text')
     
-    Args:
-        audio_data: Raw audio data in bytes
-        language: Language code for recognition (default: "en-US")
+    def test_error_handling(self):
+        """Test error handling."""
+        config = SpeechConfig()
+        recognizer = SpeechRecognizer(config)
         
-    Returns:
-        RecognitionResult: Recognition result with text and confidence
-        
-    Raises:
-        AudioError: If audio data is invalid
-        RecognitionError: If recognition fails
-        NetworkError: If API request fails
-        
-    Example:
-        >>> result = recognize_speech(audio_bytes, "de-DE")
-        >>> print(result.text)
-        "Hallo Welt"
-    """
+        with pytest.raises(AudioProcessingError):
+            recognizer.process_audio(None, 16000)
 ```
 
-### **Documentation Updates**
+### **Frontend Tests**
+```typescript
+import { render, screen } from '@testing-library/react';
+import { AudioRecorder } from '@/lib/audio-recorder';
 
-When adding new features, update:
+describe('AudioRecorder', () => {
+  it('should initialize correctly', () => {
+    const recorder = new AudioRecorder({
+      sampleRate: 16000,
+      chunkSize: 8192,
+      onChunkProcessed: jest.fn(),
+      onVisualUpdate: jest.fn(),
+      onError: jest.fn()
+    });
+    
+    expect(recorder).toBeDefined();
+  });
+  
+  it('should handle audio processing', async () => {
+    const mockCallback = jest.fn();
+    const recorder = new AudioRecorder({
+      sampleRate: 16000,
+      chunkSize: 8192,
+      onChunkProcessed: mockCallback,
+      onVisualUpdate: jest.fn(),
+      onError: jest.fn()
+    });
+    
+    // Test audio processing
+    await recorder.processAudio(sampleAudioData);
+    
+    expect(mockCallback).toHaveBeenCalled();
+  });
+});
+```
 
-- [ ] API documentation
-- [ ] README.md if relevant
-- [ ] Example scripts
-- [ ] Configuration documentation
-- [ ] Deployment guides if needed
+### **Integration Tests**
+```python
+async def test_file_transcription():
+    """Test complete file transcription flow."""
+    recognizer = SpeechRecognizer(SpeechConfig())
+    
+    # Test with actual audio file
+    result = await recognizer.process_file('test.wav', enable_diarization=False)
+    
+    assert result is not None
+    assert hasattr(result, 'text')
+    assert len(result.text) > 0
+```
 
-## 🔄 **Pull Request Process**
+## 🔍 **Code Review Process**
 
-### **1. Create Pull Request**
+### **Before Submitting**
+- [ ] Code follows project standards
+- [ ] Tests are included and passing
+- [ ] Documentation is updated
+- [ ] No console.log statements in production code
+- [ ] Error handling is comprehensive
+- [ ] Performance is acceptable
 
-- Use descriptive titles
-- Reference related issues
-- Include summary of changes
-- Add screenshots for UI changes
+### **Review Checklist**
+- [ ] Code is readable and well-documented
+- [ ] Tests cover new functionality
+- [ ] No breaking changes (unless intentional)
+- [ ] Performance impact is acceptable
+- [ ] Security considerations are addressed
+- [ ] Documentation is updated
 
-### **2. PR Description Template**
+## 🐛 **Bug Reports**
 
+### **Bug Report Template**
 ```markdown
-## Description
-[Brief description of changes]
+## Bug Description
+Brief description of the bug.
 
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
+## Steps to Reproduce
+1. Step 1
+2. Step 2
+3. Step 3
 
-## Testing
-- [ ] Unit tests added/updated
-- [ ] Integration tests added/updated
-- [ ] All tests pass
-- [ ] Manual testing completed
+## Expected Behavior
+What should happen.
 
-## Checklist
-- [ ] Code follows style guidelines
-- [ ] Self-review completed
-- [ ] Documentation updated
-- [ ] No breaking changes (or documented)
-- [ ] Performance impact considered
+## Actual Behavior
+What actually happens.
 
-## Related Issues
-Closes #[issue_number]
+## Environment
+- OS: [e.g., macOS 13.0]
+- Python: [e.g., 3.9.0]
+- Node.js: [e.g., 18.0.0]
+- Browser: [e.g., Chrome 120.0]
+
+## Additional Context
+Any additional information that might be helpful.
 ```
 
-### **3. Review Process**
+## ✨ **Feature Requests**
 
-1. **Automated Checks** - CI/CD pipeline runs tests
-2. **Code Review** - Maintainers review the code
-3. **Discussion** - Address feedback and questions
-4. **Approval** - At least one maintainer approval required
-5. **Merge** - Changes merged to main branch
+### **Feature Request Template**
+```markdown
+## Feature Description
+Brief description of the feature.
 
-## 🏷️ **Commit Message Guidelines**
+## Use Case
+Why is this feature needed?
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
+## Proposed Solution
+How should this feature work?
 
-```
-<type>[optional scope]: <description>
+## Alternatives Considered
+What other approaches were considered?
 
-[optional body]
-
-[optional footer(s)]
-```
-
-### **Types**
-
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes
-- `refactor`: Code refactoring
-- `test`: Test changes
-- `chore`: Build/tooling changes
-
-### **Examples**
-
-```bash
-feat: add support for German language recognition
-fix: resolve audio device detection issue
-docs: update API reference with new endpoints
-test: add unit tests for SpeechConfig class
-refactor: improve error handling in AudioConfig
+## Additional Context
+Any additional information that might be helpful.
 ```
 
-## 🚨 **Security Guidelines**
+## 🚀 **Release Process**
 
-### **Security Best Practices**
-
-- **Never commit secrets** - API keys, passwords, etc.
-- **Validate inputs** - Sanitize user inputs
-- **Use secure defaults** - Implement secure by default
-- **Follow OWASP guidelines** - Web security best practices
-- **Report vulnerabilities** - Use security advisories
-
-### **Reporting Security Issues**
-
-For security issues, please:
-
-1. **Don't create public issues** for security vulnerabilities
-2. **Email security@groq.com** with details
-3. **Include reproduction steps** and impact assessment
-4. **Allow time for response** before public disclosure
-
-## 🌍 **Internationalization**
-
-### **Translation Guidelines**
-
-- **Use English** for code comments and documentation
-- **Support Unicode** in all text processing
-- **Provide translations** for user-facing messages
-- **Test with different languages** and character sets
-
-## 📊 **Performance Guidelines**
-
-### **Performance Considerations**
-
-- **Profile code** before optimizing
-- **Measure impact** of changes
-- **Consider memory usage** for large audio files
-- **Optimize network requests** and caching
-- **Test with realistic data** sizes
-
-## 🎯 **Release Process**
-
-### **Versioning**
-
-We follow [Semantic Versioning](https://semver.org/):
-
-- **MAJOR**: Breaking changes
-- **MINOR**: New features (backward compatible)
-- **PATCH**: Bug fixes (backward compatible)
+### **Version Numbering**
+- **Major** (1.0.0): Breaking changes
+- **Minor** (1.1.0): New features, backward compatible
+- **Patch** (1.0.1): Bug fixes, backward compatible
 
 ### **Release Checklist**
+- [ ] All tests are passing
+- [ ] Documentation is updated
+- [ ] Changelog is updated
+- [ ] Version numbers are updated
+- [ ] Release notes are written
 
-- [ ] All tests pass
-- [ ] Documentation updated
-- [ ] Changelog updated
-- [ ] Version bumped
-- [ ] Release notes prepared
-- [ ] Security review completed
+## 📚 **Resources**
+
+### **Documentation**
+- [Architecture Guide](ARCHITECTURE.md)
+- [API Reference](../groq_speech/API_REFERENCE.md)
+- [Code Analysis](CODE_ANALYSIS.md)
+- [Deployment Guide](../deployment/README.md)
+
+### **External Resources**
+- [Groq API Documentation](https://console.groq.com/docs)
+- [Pyannote.audio Documentation](https://github.com/pyannote/pyannote-audio)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Next.js Documentation](https://nextjs.org/docs)
 
 ## 🤝 **Community Guidelines**
 
 ### **Code of Conduct**
+- Be respectful and inclusive
+- Focus on constructive feedback
+- Help others learn and grow
+- Follow the golden rule
 
-We are committed to providing a welcoming and inclusive environment. Please:
+### **Communication**
+- Use clear and concise language
+- Provide context for questions
+- Be patient with newcomers
+- Celebrate contributions
 
-- **Be respectful** and inclusive
-- **Listen to others** and consider their perspectives
-- **Give constructive feedback**
-- **Help newcomers** learn and contribute
-- **Report inappropriate behavior** to maintainers
+## 📞 **Getting Help**
 
-### **Communication Channels**
+### **Questions and Support**
+- **GitHub Issues**: For bug reports and feature requests
+- **Discussions**: For general questions and ideas
+- **Pull Requests**: For code contributions
+- **Documentation**: For usage questions
 
-- **GitHub Issues**: Bug reports and feature requests
-- **GitHub Discussions**: General questions and ideas
-- **Discord**: Real-time chat and community
-- **Email**: support@groq.com for private matters
+### **Development Help**
+- **Code Review**: Ask for help with code reviews
+- **Testing**: Get help with test cases
+- **Documentation**: Get help with documentation
+- **Architecture**: Get help with design decisions
 
-## 🏆 **Recognition**
+## 🎉 **Recognition**
 
 ### **Contributor Recognition**
+- Contributors are listed in the README
+- Significant contributions are highlighted
+- Regular contributors may be invited as maintainers
+- All contributions are appreciated and valued
 
-We recognize contributors through:
-
-- **Contributor Hall of Fame** in documentation
-- **Release notes** mentioning contributors
-- **Special thanks** for significant contributions
-- **Contributor badges** on GitHub profiles
-
-### **Getting Help**
-
-If you need help contributing:
-
-1. **Check documentation** first
-2. **Search existing issues** for similar questions
-3. **Ask in discussions** for general questions
-4. **Contact maintainers** for specific guidance
-
-## 📝 **License**
-
-By contributing to this project, you agree that your contributions will be licensed under the same license as the project (MIT License).
+### **Types of Contributions**
+- **Code**: Bug fixes, new features, improvements
+- **Documentation**: Guides, examples, API references
+- **Testing**: Test cases, bug reports, quality assurance
+- **Community**: Helping others, answering questions
 
 ---
 
-**Thank you for contributing to the Groq Speech SDK!** 🎉
-
-Your contributions help make speech recognition more accessible and powerful for developers worldwide. 
+**Thank you for contributing to the Groq Speech SDK! Together, we can build amazing speech processing tools.**

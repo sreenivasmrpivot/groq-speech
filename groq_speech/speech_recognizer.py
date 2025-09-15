@@ -900,3 +900,53 @@ class SpeechRecognizer:
         # Process the entire audio as one chunk
         return self.recognize_audio_data(audio_data, sample_rate, is_translation)
     
+    def trim_silence_from_end(self, audio_data: np.ndarray, sample_rate: int, 
+                             silence_threshold: float = 0.01, 
+                             min_silence_duration: float = 0.5) -> np.ndarray:
+        """
+        Trim silence from the end of audio data to improve processing quality.
+        
+        This method removes trailing silence from audio data, which can improve
+        processing efficiency and reduce unnecessary API calls for empty audio.
+        
+        Args:
+            audio_data: Audio data as numpy array
+            sample_rate: Sample rate of the audio
+            silence_threshold: RMS threshold below which audio is considered silence
+            min_silence_duration: Minimum duration of silence to trim (seconds)
+            
+        Returns:
+            Trimmed audio data
+        """
+        if len(audio_data) == 0:
+            return audio_data
+        
+        # Calculate RMS for each 0.1 second window
+        window_size = int(sample_rate * 0.1)  # 0.1 second windows
+        min_silence_samples = int(sample_rate * min_silence_duration)
+        
+        # Find the last non-silent window
+        last_non_silent = len(audio_data)
+        
+        for i in range(len(audio_data) - window_size, -1, -window_size):
+            window = audio_data[i:i + window_size]
+            rms = np.sqrt(np.mean(window ** 2))
+            
+            if rms > silence_threshold:
+                last_non_silent = i + window_size
+                break
+        
+        # Trim to the last non-silent point, but keep at least min_silence_duration
+        # of silence if there was significant silence
+        if last_non_silent < len(audio_data) - min_silence_samples:
+            trimmed_length = min(last_non_silent + min_silence_samples, len(audio_data))
+        else:
+            trimmed_length = last_non_silent
+        
+        trimmed_audio = audio_data[:trimmed_length]
+        
+        self.logger.debug(f"Trimmed audio: {len(audio_data)} -> {len(trimmed_audio)} samples "
+                         f"({len(trimmed_audio) / sample_rate:.2f}s)")
+        
+        return trimmed_audio
+    

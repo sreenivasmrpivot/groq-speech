@@ -48,7 +48,9 @@ from groq_speech import (
     SpeechConfig,
     SpeechRecognizer,
     ResultReason,
+    AudioFormatUtils,
 )
+from groq_speech.vad_service import VADService, VADConfig
 from groq_speech.logging_utils import api_logger
 
 
@@ -96,6 +98,20 @@ class HealthResponse(BaseModel):
     version: str
     api_key_configured: bool
 
+class VADRequest(BaseModel):
+    """Request model for VAD operations."""
+    audio_data: List[float]  # Float32Array as JSON list
+    sample_rate: int = 16000
+    max_duration_seconds: Optional[float] = None
+
+class VADResponse(BaseModel):
+    """Response model for VAD operations."""
+    success: bool
+    should_create_chunk: bool
+    reason: str
+    audio_level: float
+    error: Optional[str] = None
+
 
 # Global state - WebSocket functionality removed
 
@@ -135,22 +151,29 @@ def get_speech_config(
     model: Optional[str] = None,
     is_translation: bool = False,
     target_language: str = "en",
+    enable_timestamps: bool = False,
+    enable_diarization: bool = False,
 ) -> SpeechConfig:
-    """Create speech configuration - EXACTLY like CLI."""
-    config = SpeechConfig()
-
-    # Language auto-detection is enabled by default in SpeechConfig
-    # This ensures Groq API automatically detects the language correctly
-
-    # Enable translation if requested - EXACTLY like CLI
-    if is_translation:
-        config.enable_translation = True
-        config.set_translation_target_language(target_language)
-
-    # For transcription mode, ensure language auto-detection is enabled
-    # This is the key difference that was causing language misidentification
-
-    return config
+    """Create speech configuration using SDK factory methods."""
+    if enable_diarization:
+        return SpeechConfig.create_for_diarization(
+            model=model,
+            target_language=target_language,
+            enable_timestamps=enable_timestamps,
+            is_translation=is_translation
+        )
+    elif is_translation:
+        return SpeechConfig.create_for_translation(
+            model=model,
+            target_language=target_language,
+            enable_timestamps=enable_timestamps
+        )
+    else:
+        return SpeechConfig.create_for_recognition(
+            model=model,
+            target_language=target_language,
+            enable_timestamps=enable_timestamps
+        )
 
 
 @app.get("/", response_model=Dict[str, str])
@@ -273,11 +296,13 @@ async def recognize_speech(request: RecognitionRequest):
             "target_language": request.target_language
         }, "Audio data received from frontend")
 
-        # Setup speech configuration - EXACTLY like CLI
+        # Setup speech configuration using SDK factory
         speech_config = get_speech_config(
             model=request.model,
             is_translation=False,
             target_language=request.target_language,
+            enable_timestamps=request.enable_timestamps,
+            enable_diarization=request.enable_diarization,
         )
 
         # Create recognizer - EXACTLY like CLI
@@ -286,36 +311,18 @@ async def recognize_speech(request: RecognitionRequest):
             translation_target_language=request.target_language
         )
 
-        # Decode audio data
-        import base64
-        import numpy as np
-        import tempfile
-        import soundfile as sf
-        import io
-
-        audio_bytes = base64.b64decode(request.audio_data)
+        # Decode audio data using SDK utilities
+        audio_array_float, sample_rate = AudioFormatUtils.decode_base64_audio(request.audio_data)
         
-        # Try to decode as WAV file first (proper audio format)
-        try:
-            audio_array_float, sample_rate = sf.read(io.BytesIO(audio_bytes))
-            print(f"📊 Decoded as WAV: {len(audio_array_float)} samples, {sample_rate}Hz")
-            print(f"🎵 Audio range: {audio_array_float.min():.4f} to {audio_array_float.max():.4f}")
-        except Exception as e:
-            print(f"⚠️  Failed to decode as WAV, falling back to raw PCM: {e}")
-            # Fallback to raw PCM int16 (old behavior)
-            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-            audio_array_float = audio_array.astype(np.float32) / 32768.0
-            sample_rate = 16000
-            print(f"📊 Decoded as raw PCM: {len(audio_array)} samples, {sample_rate}Hz")
-            print(f"🎵 Audio range: {audio_array_float.min():.4f} to {audio_array_float.max():.4f}")
+        # Log audio information
+        audio_info = AudioFormatUtils.get_audio_info(audio_array_float, sample_rate)
+        api_logger.info("📊 Audio data decoded", audio_info)
 
         # Process based on diarization requirement
         if request.enable_diarization:
             # For diarization, save to temp file and use process_file
             print("🎭 Processing with diarization...")
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_path = temp_file.name
-                sf.write(temp_path, audio_array_float, sample_rate)
+            temp_path = AudioFormatUtils.save_audio_to_temp_file(audio_array_float, sample_rate)
             
             try:
                 api_logger.dataFlow("API", "Groq API", {
@@ -324,7 +331,7 @@ async def recognize_speech(request: RecognitionRequest):
                     "enable_diarization": True,
                     "is_translation": False,
                     "audio_samples": len(audio_array_float),
-                    "sample_rate": 16000
+                    "sample_rate": sample_rate
                 }, "Sending audio file to Groq API for diarization")
                 
                 result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=False)
@@ -337,12 +344,8 @@ async def recognize_speech(request: RecognitionRequest):
                     "text_length": len(result.text) if hasattr(result, 'text') and result.text else 0
                 }, "Received diarization result from Groq API")
             finally:
-                # Clean up temporary file
-                try:
-                    import os
-                    os.unlink(temp_path)
-                except:
-                    pass
+                # Clean up temporary file using SDK utility
+                AudioFormatUtils.cleanup_temp_file(temp_path)
         else:
             # For non-diarization, use direct audio data processing
             print("🎤 Processing without diarization...")
@@ -440,15 +443,15 @@ async def translate_speech(request: RecognitionRequest):
         print(f"📊 Audio data length: {len(request.audio_data)} characters")
         print(f"🎭 Enable diarization: {request.enable_diarization}")
 
-        # Setup speech configuration for translation - EXACTLY like CLI
+        # Setup speech configuration for translation using SDK factory
         speech_config = get_speech_config(
             model=request.model,
             is_translation=True,
             target_language=request.target_language,
+            enable_timestamps=request.enable_timestamps,
+            enable_diarization=request.enable_diarization,
         )
 
-        # Enable translation - EXACTLY like CLI
-        speech_config.enable_translation = True
         print(f"🔀 Translation mode enabled (target: {request.target_language})")
 
         # Create recognizer - EXACTLY like CLI (AFTER enabling translation)
@@ -457,46 +460,24 @@ async def translate_speech(request: RecognitionRequest):
             translation_target_language=request.target_language
         )
 
-        # Decode audio data
-        import base64
-        import numpy as np
-        import tempfile
-        import soundfile as sf
-        import io
-
-        audio_bytes = base64.b64decode(request.audio_data)
+        # Decode audio data using SDK utilities
+        audio_array_float, sample_rate = AudioFormatUtils.decode_base64_audio(request.audio_data)
         
-        # Try to decode as WAV file first (proper audio format)
-        try:
-            audio_array_float, sample_rate = sf.read(io.BytesIO(audio_bytes))
-            print(f"📊 Decoded as WAV: {len(audio_array_float)} samples, {sample_rate}Hz")
-            print(f"🎵 Audio range: {audio_array_float.min():.4f} to {audio_array_float.max():.4f}")
-        except Exception as e:
-            print(f"⚠️  Failed to decode as WAV, falling back to raw PCM: {e}")
-            # Fallback to raw PCM int16 (old behavior)
-            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-            audio_array_float = audio_array.astype(np.float32) / 32768.0
-            sample_rate = 16000
-            print(f"📊 Decoded as raw PCM: {len(audio_array)} samples, {sample_rate}Hz")
-            print(f"🎵 Audio range: {audio_array_float.min():.4f} to {audio_array_float.max():.4f}")
+        # Log audio information
+        audio_info = AudioFormatUtils.get_audio_info(audio_array_float, sample_rate)
+        api_logger.info("📊 Audio data decoded for translation", audio_info)
 
         # Process based on diarization requirement
         if request.enable_diarization:
             # For diarization, save to temp file and use process_file
             print("🎭 Processing translation with diarization...")
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_path = temp_file.name
-                sf.write(temp_path, audio_array_float, sample_rate)
+            temp_path = AudioFormatUtils.save_audio_to_temp_file(audio_array_float, sample_rate)
             
             try:
                 result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=True)
             finally:
-                # Clean up temporary file
-                try:
-                    import os
-                    os.unlink(temp_path)
-                except:
-                    pass
+                # Clean up temporary file using SDK utility
+                AudioFormatUtils.cleanup_temp_file(temp_path)
         else:
             # For non-diarization, use direct audio data processing
             print("🔀 Processing translation without diarization...")
@@ -599,11 +580,12 @@ async def recognize_microphone_single(request: dict):
         print(f"📊 Microphone audio: {len(audio_array)} samples, {sample_rate}Hz")
         print(f"📊 Duration: {len(audio_array) / sample_rate:.2f} seconds")
 
-        # Setup speech configuration - EXACTLY like speech_demo.py
+        # Setup speech configuration using SDK factory
         speech_config = get_speech_config(
             model="whisper-large-v3-turbo",
             is_translation=is_translation,
             target_language=target_language,
+            enable_diarization=enable_diarization,
         )
 
         # Create recognizer - EXACTLY like speech_demo.py
@@ -615,21 +597,13 @@ async def recognize_microphone_single(request: dict):
         # Process with groq_speech - EXACTLY like speech_demo.py process_microphone_single
         if enable_diarization:
             # For diarization, save to temp file and use process_file - EXACTLY like speech_demo.py
-            import tempfile
-            import soundfile as sf
-            
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_path = temp_file.name
-                sf.write(temp_path, audio_array, sample_rate)
+            temp_path = AudioFormatUtils.save_audio_to_temp_file(audio_array, sample_rate)
             
             try:
                 result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
             finally:
-                # Clean up temporary file
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
+                # Clean up temporary file using SDK utility
+                AudioFormatUtils.cleanup_temp_file(temp_path)
         else:
             # For non-diarization, use chunked audio data processing - EXACTLY like speech_demo.py
             result = recognizer.recognize_audio_data_chunked(audio_array, sample_rate, is_translation=is_translation)
@@ -715,11 +689,12 @@ async def recognize_microphone_continuous(request: dict):
         print(f"📊 Continuous microphone chunk: {len(audio_array)} samples, {sample_rate}Hz")
         print(f"📊 Duration: {len(audio_array) / sample_rate:.2f} seconds")
 
-        # Setup speech configuration - EXACTLY like speech_demo.py
+        # Setup speech configuration using SDK factory
         speech_config = get_speech_config(
             model="whisper-large-v3-turbo",
             is_translation=is_translation,
             target_language=target_language,
+            enable_diarization=enable_diarization,
         )
 
         # Create recognizer - EXACTLY like speech_demo.py
@@ -731,21 +706,13 @@ async def recognize_microphone_continuous(request: dict):
         # Process with groq_speech - EXACTLY like speech_demo.py process_microphone_continuous
         if enable_diarization:
             # For diarization, save to temp file and use process_file - EXACTLY like speech_demo.py
-            import tempfile
-            import soundfile as sf
-            
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_path = temp_file.name
-                sf.write(temp_path, audio_array, sample_rate)
+            temp_path = AudioFormatUtils.save_audio_to_temp_file(audio_array, sample_rate)
             
             try:
                 result = await recognizer.process_file(temp_path, enable_diarization=True, is_translation=is_translation)
             finally:
-                # Clean up temporary file
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
+                # Clean up temporary file using SDK utility
+                AudioFormatUtils.cleanup_temp_file(temp_path)
         else:
             # For non-diarization, use direct audio data processing - EXACTLY like speech_demo.py
             result = recognizer.recognize_audio_data(audio_array, sample_rate, is_translation=is_translation)
@@ -799,6 +766,87 @@ async def recognize_microphone_continuous(request: dict):
         import traceback
         traceback.print_exc()
         return RecognitionResponse(success=False, error=str(e))
+
+
+@app.post("/api/v1/vad/should-create-chunk", response_model=VADResponse)
+async def vad_should_create_chunk(request: VADRequest):
+    """VAD endpoint to determine if a chunk should be created."""
+    try:
+        # Convert list to numpy array
+        import numpy as np
+        audio_array = np.array(request.audio_data, dtype=np.float32)
+        
+        # Create VAD service instance
+        vad_config = VADConfig()
+        vad_service = VADService(vad_config)
+        
+        # Determine if chunk should be created
+        should_create, reason = vad_service.should_create_chunk(
+            audio_array, 
+            request.sample_rate, 
+            request.max_duration_seconds
+        )
+        
+        # Get audio level for visual feedback
+        audio_level = vad_service.get_audio_level(audio_array)
+        
+        api_logger.info("🎤 VAD analysis completed", {
+            "should_create_chunk": should_create,
+            "reason": reason,
+            "audio_level": audio_level,
+            "audio_samples": len(audio_array),
+            "sample_rate": request.sample_rate
+        })
+        
+        return VADResponse(
+            success=True,
+            should_create_chunk=should_create,
+            reason=reason,
+            audio_level=audio_level
+        )
+        
+    except Exception as e:
+        api_logger.error(f"❌ VAD analysis failed: {e}")
+        return VADResponse(
+            success=False,
+            should_create_chunk=False,
+            reason="VAD analysis failed",
+            audio_level=0.0,
+            error=str(e)
+        )
+
+
+@app.post("/api/v1/vad/audio-level", response_model=VADResponse)
+async def vad_get_audio_level(request: VADRequest):
+    """VAD endpoint to get audio level for visual feedback."""
+    try:
+        # Convert list to numpy array
+        import numpy as np
+        audio_array = np.array(request.audio_data, dtype=np.float32)
+        
+        # Create VAD service instance
+        vad_config = VADConfig()
+        vad_service = VADService(vad_config)
+        
+        # Get audio level
+        audio_level = vad_service.get_audio_level(audio_array)
+        
+        return VADResponse(
+            success=True,
+            should_create_chunk=False,
+            reason="Audio level calculated",
+            audio_level=audio_level
+        )
+        
+    except Exception as e:
+        api_logger.error(f"❌ Audio level calculation failed: {e}")
+        return VADResponse(
+            success=False,
+            should_create_chunk=False,
+            reason="Audio level calculation failed",
+            audio_level=0.0,
+            error=str(e)
+        )
 
 
 if __name__ == "__main__":

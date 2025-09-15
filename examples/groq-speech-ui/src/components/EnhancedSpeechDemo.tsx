@@ -5,8 +5,6 @@ import { GroqAPIClient } from '@/lib/groq-api';
 import { PerformanceMetrics, RecognitionResult, DiarizationResult } from '@/types';
 import { uiLogger, audioLogger, apiLogger } from '@/lib/frontend-logger';
 import { audioConverter } from '@/lib/audio-converter';
-import { OptimizedAudioRecorder } from '@/lib/optimized-audio-recorder';
-import { OptimizedAudioConverter } from '@/lib/optimized-audio-converter';
 import { ContinuousAudioRecorder } from '@/lib/continuous-audio-recorder';
 import {
     Download,
@@ -203,8 +201,6 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
     });
 
     const audioRecorderRef = useRef<AudioRecorder | null>(null);
-    const optimizedAudioRecorderRef = useRef<OptimizedAudioRecorder | null>(null);
-    const optimizedAudioConverterRef = useRef<OptimizedAudioConverter | null>(null);
     const continuousAudioRecorderRef = useRef<ContinuousAudioRecorder | null>(null);
     const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const apiClientRef = useRef<GroqAPIClient | null>(null);
@@ -256,21 +252,21 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                 // Use optimized recorder for large files
                 console.log('🎤 Using optimized recorder for single mode');
                 
-                if (!optimizedAudioRecorderRef.current) {
-                    optimizedAudioRecorderRef.current = new OptimizedAudioRecorder({
+                if (!audioRecorderRef.current) {
+                    audioRecorderRef.current = new AudioRecorder({
                         chunkInterval: 1000, // 1 second chunks
                         onChunk: async (chunk: Blob, chunkIndex: number) => {
                             console.log('📦 Optimized audio chunk received', {
                                 chunkIndex: chunkIndex,
                                 chunkSize: chunk.size,
                                 chunkType: chunk.type,
-                                recordingDuration: optimizedAudioRecorderRef.current?.getStatus().duration || 0
+                                recordingDuration: audioRecorderRef.current?.getStatus().duration || 0
                             });
                             
                             // Note: Continuous mode now uses ContinuousAudioRecorder with VAD
                             // This onChunk callback is only used for single mode
                         },
-                        onComplete: async (audioBlob: Blob, duration: number) => {
+                        onRecordingComplete: async (audioBlob: Blob, duration: number) => {
                             console.log('✅ Optimized recording completed', {
                                 audioSize: audioBlob.size,
                                 duration: duration,
@@ -300,9 +296,10 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                     });
                 }
 
-                audioLogger.info('OptimizedAudioRecorder initialized', {
-                    recorderType: 'OptimizedAudioRecorder',
-                    mode: currentConfig.mode
+                audioLogger.info('AudioRecorder initialized (optimized mode)', {
+                    recorderType: 'AudioRecorder',
+                    mode: currentConfig.mode,
+                    isOptimized: true
                 });
             } else {
                 // Use legacy recorder for backward compatibility
@@ -352,9 +349,9 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                 console.log('🎤 Continuous recording started with VAD-based silence detection');
             } else {
                 // For single mode, start recording with the appropriate recorder
-                if (useOptimizedRecorder && optimizedAudioRecorderRef.current) {
+                if (useOptimizedRecorder && audioRecorderRef.current) {
                     // Use optimized recorder
-                    await optimizedAudioRecorderRef.current.startRecording();
+                    await audioRecorderRef.current.startOptimizedRecording();
                     console.log('🎤 Optimized recording started for single mode');
                 } else if (audioRecorderRef.current) {
                     // Use legacy recorder
@@ -406,10 +403,10 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
             timestamp: new Date().toISOString()
         });
 
-        if (useOptimizedRecorder && optimizedAudioRecorderRef.current) {
+        if (useOptimizedRecorder && audioRecorderRef.current) {
             // Use optimized recorder
             console.log('🛑 Stopping optimized recording...');
-            optimizedAudioRecorderRef.current.stopRecording();
+            audioRecorderRef.current.stopRecording();
         } else if (audioRecorderRef.current) {
             // Use legacy recorder
             console.log('🛑 Stopping legacy recording...');
@@ -600,13 +597,8 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                 audioSizeMB: (audioBlob.size / (1024 * 1024)).toFixed(2) + ' MB'
             });
 
-            // Initialize optimized converter if needed
-            if (!optimizedAudioConverterRef.current) {
-                optimizedAudioConverterRef.current = new OptimizedAudioConverter();
-            }
-
-            // Convert audio to PCM and base64
-            const conversionResult = await optimizedAudioConverterRef.current.convertToPCM(audioBlob);
+            // Convert audio to PCM and base64 using optimized method
+            const conversionResult = await audioConverter.convertToPCMOptimized(audioBlob);
             
             console.log('✅ Optimized audio conversion completed', {
                 pcmLength: conversionResult.pcmData.length,
