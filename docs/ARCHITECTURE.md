@@ -84,10 +84,10 @@ graph TB
     CLI -->|Direct Calls| SDK
     API -->|Direct Calls| SDK
     
-    style UI fill:#e1f5fe
-    style API fill:#f3e5f5
-    style CLI fill:#f3e5f5
-    style SDK fill:#e8f5e8
+    style UI fill:#1976D2,color:#ffffff
+    style API fill:#7B1FA2,color:#ffffff
+    style CLI fill:#7B1FA2,color:#ffffff
+    style SDK fill:#388E3C,color:#ffffff
 ```
 
 ### **CLI Flow Pattern**
@@ -137,10 +137,10 @@ graph LR
         B2 -->|Mic| B11[Float32Array] --> B12[HTTP REST] --> B13[Array conversion] --> B6[numpy array] --> B7[SDK Processing] --> B8[JSON] --> B9[HTTP REST] --> B10[UI Display]
     end
     
-    style A1 fill:#e8f5e8
-    style A4 fill:#e8f5e8
-    style B1 fill:#e1f5fe
-    style B9 fill:#e1f5fe
+    style A1 fill:#388E3C,color:#ffffff
+    style A4 fill:#388E3C,color:#ffffff
+    style B1 fill:#1976D2,color:#ffffff
+    style B9 fill:#1976D2,color:#ffffff
 ```
 
 ## 🎯 **Current API Endpoints**

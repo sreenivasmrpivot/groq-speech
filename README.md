@@ -70,26 +70,32 @@ cd examples/groq-speech-ui && npm run dev
 
 ### **3-Layer Architecture**
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Layer 3: User Interfaces                │
-├─────────────────────────────────────────────────────────────┤
-│  CLI Client (speech_demo.py)  │  Web UI (groq-speech-ui)   │
-└─────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Layer 2: API Layer                      │
-├─────────────────────────────────────────────────────────────┤
-│                    FastAPI Server (api/)                   │
-└─────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Layer 1: Core SDK                       │
-├─────────────────────────────────────────────────────────────┤
-│              groq_speech/ (Python SDK)                     │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph "Layer 3: UI Client"
+        UI[groq-speech-ui/<br/>EnhancedSpeechDemo.tsx<br/>PerformanceMetrics.tsx]
+    end
+    
+    subgraph "Layer 2b: API Client"
+        API[api/server.py<br/>FastAPI REST API only]
+    end
+    
+    subgraph "Layer 2a: CLI Client"
+        CLI[speech_demo.py<br/>Command Line Interface]
+    end
+    
+    subgraph "Layer 1: SDK"
+        SDK[groq_speech/<br/>speech_recognizer.py<br/>speaker_diarization.py<br/>vad_service.py<br/>audio_utils.py]
+    end
+    
+    UI -->|HTTP REST| API
+    CLI -->|Direct Calls| SDK
+    API -->|Direct Calls| SDK
+    
+    style UI fill:#1976D2,color:#ffffff
+    style API fill:#7B1FA2,color:#ffffff
+    style CLI fill:#7B1FA2,color:#ffffff
+    style SDK fill:#388E3C,color:#ffffff
 ```
 
 ### **Key Components**
