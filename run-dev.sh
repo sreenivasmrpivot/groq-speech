@@ -40,8 +40,12 @@ if [ "$HELP" = true ]; then
     echo "  --help, -h       Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                # Run in normal mode"
+    echo "  $0                # Run in normal mode (HTTPS for microphone access)"
     echo "  $0 --verbose      # Run with verbose logging"
+    echo ""
+    echo "Note: Frontend runs on HTTPS (https://localhost:3443) to enable microphone access."
+    echo "      Your browser will show a security warning for the self-signed certificate."
+    echo "      Click 'Advanced' and 'Proceed to localhost' to continue."
     exit 0
 fi
 
@@ -184,7 +188,7 @@ start_backend() {
 
 # Start frontend
 start_frontend() {
-    print_status "Starting frontend..."
+    print_status "Starting frontend with HTTPS support for microphone access..."
     cd examples/groq-speech-ui
     
     # Set verbose environment variable if verbose mode is enabled
@@ -195,25 +199,26 @@ start_frontend() {
         print_status "Frontend verbose logging enabled"
     fi
     
-    # Start frontend with appropriate logging
+    # Start frontend with HTTPS support for microphone access
     if [ "$VERBOSE" = true ]; then
-        print_status "Starting frontend with verbose logging..."
-        NEXT_PUBLIC_VERBOSE=true NEXT_PUBLIC_DEBUG=true NEXT_PUBLIC_LOG_LEVEL=DEBUG npm run dev 2>&1 | while IFS= read -r line; do
+        print_status "Starting frontend with HTTPS and verbose logging..."
+        NEXT_PUBLIC_VERBOSE=true NEXT_PUBLIC_DEBUG=true NEXT_PUBLIC_LOG_LEVEL=DEBUG npm run dev:https 2>&1 | while IFS= read -r line; do
             echo -e "${GREEN}[FRONTEND]${NC} $line"
         done &
         FRONTEND_PID=$!
     else
-        npm run dev > frontend.log 2>&1 &
+        npm run dev:https > frontend.log 2>&1 &
         FRONTEND_PID=$!
     fi
     
     cd ../..
     
-    # Wait for frontend to be ready
+    # Wait for frontend to be ready (HTTPS on port 3443)
     print_status "Waiting for frontend to be ready..."
     for i in {1..30}; do
-        if curl -s http://localhost:3000 > /dev/null 2>&1; then
-            print_success "Frontend ready at http://localhost:3000"
+        if curl -s -k https://localhost:3443 > /dev/null 2>&1; then
+            print_success "Frontend ready at https://localhost:3443"
+            print_success "🎤 Microphone access is now enabled!"
             break
         fi
         if [ $i -eq 30 ]; then
@@ -258,7 +263,7 @@ main() {
     
     print_success "🎉 Development environment is ready!"
     echo ""
-    echo "🌐 Frontend: http://localhost:3000"
+    echo "🌐 Frontend: https://localhost:3443 (HTTPS - Microphone enabled!)"
     echo "🔧 Backend: http://localhost:8000"
     echo "📖 API Docs: http://localhost:8000/docs"
     echo ""
