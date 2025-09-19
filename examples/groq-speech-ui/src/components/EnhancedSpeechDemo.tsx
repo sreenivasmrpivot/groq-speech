@@ -387,9 +387,9 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                         sampleRate: 16000,
                         chunkSize: 8192,
                         maxDurationSeconds: 390, // 6.5 minutes
-                        onChunkProcessed: async (audioData: Float32Array, sampleRate: number, reason: string) => {
+                        onChunkProcessed: async (audioData: Float32Array, sampleRate: number, reason: string, chunkDuration: number) => {
                             console.log(`🔄 Processing continuous chunk: ${reason}`);
-                            await processContinuousRecognitionMicrophone(audioData, sampleRate);
+                            await processContinuousRecognitionMicrophone(audioData, sampleRate, chunkDuration);
                         },
                         onVisualUpdate: (audioLevel: number, duration: number, sizeMB: number, status: string) => {
                             setAudioLevel(audioLevel);
@@ -593,12 +593,14 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
     };
 
 
-    const processContinuousRecognitionMicrophone = async (pcmData: Float32Array, sampleRate: number) => {
+    const processContinuousRecognitionMicrophone = async (pcmData: Float32Array, sampleRate: number, chunkDuration?: number) => {
         try {
-            // Calculate actual duration for logging
-            const actualDuration = recordingStartTimeRef.current 
-                ? (Date.now() - recordingStartTimeRef.current) / 1000 
-                : recordingDuration;
+            // Use chunk duration if provided, otherwise calculate from recording start
+            const actualDuration = chunkDuration !== undefined 
+                ? chunkDuration 
+                : (recordingStartTimeRef.current 
+                    ? (Date.now() - recordingStartTimeRef.current) / 1000 
+                    : recordingDuration);
                 
             uiLogger.processing('Processing continuous microphone audio chunk (like speech_demo.py)', {
                 audioSamples: pcmData.length,
