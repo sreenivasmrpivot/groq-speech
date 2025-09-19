@@ -85,39 +85,51 @@ function startNextDevServer() {
     // Ignore errors - port might not be in use
   }
   
-  const nextProcess = spawn('npm', ['run', 'dev'], {
-    cwd: path.join(__dirname, '..'),
-    stdio: 'pipe',
-    shell: true,
-    env: { ...process.env, PORT: NEXT_PORT.toString() }
-  });
+  // Wait a moment for processes to fully terminate
+  setTimeout(() => {
+    const nextProcess = spawn('npm', ['run', 'dev'], {
+      cwd: path.join(__dirname, '..'),
+      stdio: 'pipe',
+      shell: true,
+      env: { 
+        ...process.env, 
+        PORT: NEXT_PORT.toString(),
+        NEXT_PUBLIC_FRONTEND_URL: `https://localhost:${HTTPS_PORT}`,
+        NODE_OPTIONS: '--max-old-space-size=4096' // Increase memory limit
+      }
+    });
 
-  nextProcess.stdout.on('data', (data) => {
-    const output = data.toString();
-    if (output.includes('ready - started server on')) {
-      log('✅ Next.js development server is ready', 'green');
-    }
-    // Don't log all Next.js output to keep console clean
-  });
+    let serverStarted = false;
 
-  nextProcess.stderr.on('data', (data) => {
-    const output = data.toString();
-    if (output.includes('error') || output.includes('Error')) {
-      log(`Next.js Error: ${output}`, 'red');
-    }
-  });
+    nextProcess.stdout.on('data', (data) => {
+      const output = data.toString();
+      if (output.includes('ready - started server on') && !serverStarted) {
+        serverStarted = true;
+        log('✅ Next.js development server is ready', 'green');
+      }
+      // Don't log all Next.js output to keep console clean
+    });
 
-  nextProcess.on('close', (code) => {
-    if (code !== 0) {
-      log(`❌ Next.js development server exited with code ${code}`, 'red');
-    }
-  });
+    nextProcess.stderr.on('data', (data) => {
+      const output = data.toString();
+      if (output.includes('error') || output.includes('Error')) {
+        log(`Next.js Error: ${output}`, 'red');
+      }
+    });
 
-  nextProcess.on('error', (error) => {
-    log(`❌ Failed to start Next.js development server: ${error.message}`, 'red');
-  });
+    nextProcess.on('close', (code) => {
+      if (code !== 0) {
+        log(`❌ Next.js development server exited with code ${code}`, 'red');
+      }
+    });
 
-  return nextProcess;
+    nextProcess.on('error', (error) => {
+      log(`❌ Failed to start Next.js development server: ${error.message}`, 'red');
+    });
+
+    // Store the process globally so we can access it
+    global.nextProcess = nextProcess;
+  }, 1000); // Wait 1 second before starting
 }
 
 function createHttpsProxy() {
@@ -224,36 +236,55 @@ function waitForNextJsServer() {
   return new Promise((resolve) => {
     const maxAttempts = 30;
     let attempts = 0;
+    let serverReady = false;
     
     const checkServer = () => {
+      if (serverReady) {
+        return; // Don't check again if already ready
+      }
+      
       attempts++;
       const req = http.request({
         hostname: 'localhost',
         port: NEXT_PORT,
         path: '/',
-        method: 'GET'
+        method: 'GET',
+        timeout: 3000 // 3 second timeout
       }, (res) => {
-        log('✅ Next.js server is ready', 'green');
-        resolve();
+        if (!serverReady) {
+          serverReady = true;
+          log('✅ Next.js server is ready', 'green');
+          resolve();
+        }
       });
 
-      req.on('error', () => {
+      req.on('error', (err) => {
+        if (serverReady) {
+          return; // Don't retry if already ready
+        }
+        
         if (attempts < maxAttempts) {
           log(`⏳ Attempt ${attempts}/${maxAttempts}: Waiting for Next.js server...`, 'yellow');
-          setTimeout(checkServer, 1000);
+          setTimeout(checkServer, 2000); // Wait 2 seconds between attempts
         } else {
-          log('❌ Next.js server failed to start within 30 seconds', 'red');
+          log('❌ Next.js server failed to start within 60 seconds', 'red');
+          log('   The HTTPS server will start anyway, but Next.js may not be ready', 'yellow');
           resolve(); // Continue anyway
         }
       });
 
-      req.setTimeout(2000, () => {
+      req.on('timeout', () => {
         req.destroy();
+        if (serverReady) {
+          return; // Don't retry if already ready
+        }
+        
         if (attempts < maxAttempts) {
           log(`⏳ Attempt ${attempts}/${maxAttempts}: Next.js server timeout, retrying...`, 'yellow');
-          setTimeout(checkServer, 1000);
+          setTimeout(checkServer, 2000); // Wait 2 seconds between attempts
         } else {
-          log('❌ Next.js server failed to start within 30 seconds', 'red');
+          log('❌ Next.js server failed to start within 60 seconds', 'red');
+          log('   The HTTPS server will start anyway, but Next.js may not be ready', 'yellow');
           resolve(); // Continue anyway
         }
       });
@@ -283,7 +314,7 @@ async function main() {
   }
   
   // Start Next.js development server
-  const nextProcess = startNextDevServer();
+  startNextDevServer();
   
   // Wait for Next.js to be ready
   log('⏳ Waiting for Next.js server to be ready...', 'blue');
@@ -295,7 +326,9 @@ async function main() {
   // Graceful shutdown
   process.on('SIGINT', () => {
     log('\n🛑 Shutting down servers...', 'yellow');
-    nextProcess.kill();
+    if (global.nextProcess) {
+      global.nextProcess.kill();
+    }
     httpsServer.close();
     process.exit(0);
   });

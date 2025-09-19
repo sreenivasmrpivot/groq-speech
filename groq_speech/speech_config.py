@@ -58,9 +58,10 @@ from typing import Optional, Dict, Any
 import os
 from dotenv import load_dotenv
 
-# Load .env file from the groq_speech directory
-current_dir = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.join(current_dir, ".env")
+# Load .env file from the project root directory
+# This ensures all components use the same environment configuration
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_path = os.path.join(project_root, ".env")
 load_dotenv(env_path)
 
 

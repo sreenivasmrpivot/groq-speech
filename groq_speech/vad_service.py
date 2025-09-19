@@ -80,14 +80,14 @@ def _initialize_vad():
 @dataclass
 class VADConfig:
     """Configuration for Voice Activity Detection."""
-    threshold: float = 0.3  # Speech detection threshold (0.0-1.0) - Lowered for better sensitivity
-    min_speech_duration_ms: int = 200  # Minimum speech duration in milliseconds - Reduced for better detection
-    min_silence_duration_ms: int = 15000  # Minimum silence duration in milliseconds (15 seconds) - Less sensitive to brief pauses
-    max_silence_duration_ms: int = 20000  # Maximum silence before forcing chunk (20 seconds)
+    threshold: float = 0.2  # Speech detection threshold (0.0-1.0) - Lowered for better sensitivity
+    min_speech_duration_ms: int = 100  # Minimum speech duration in milliseconds - Reduced for better detection
+    min_silence_duration_ms: int = 2000  # Minimum silence duration in milliseconds (2 seconds) - Much more sensitive
+    max_silence_duration_ms: int = 5000  # Maximum silence before forcing chunk (5 seconds)
     sample_rate: int = 16000  # Audio sample rate
-    enable_noise_filtering: bool = True  # Enable noise reduction before VAD
-    noise_reduction_strength: float = 0.6  # Noise reduction strength (0.0-1.0) - Reduced to preserve speech
-    webrtc_aggressiveness: int = 1  # WebRTC VAD aggressiveness (0-3, 1 = medium sensitivity)
+    enable_noise_filtering: bool = False  # Disable noise reduction to preserve speech content
+    noise_reduction_strength: float = 0.3  # Noise reduction strength (0.0-1.0) - Much more conservative
+    webrtc_aggressiveness: int = 0  # WebRTC VAD aggressiveness (0-3, 0 = least aggressive)
     max_chunk_size_mb: float = 20.0  # Maximum chunk size before forcing chunk (20MB to stay under 24MB)
 
 @dataclass

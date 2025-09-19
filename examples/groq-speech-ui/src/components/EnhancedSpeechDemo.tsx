@@ -1,11 +1,11 @@
 'use client';
 
-import { AudioRecorder } from '@/lib/audio-recorder';
 import { GroqAPIClient } from '@/lib/groq-api';
 import { PerformanceMetrics, RecognitionResult, DiarizationResult } from '@/types';
 import { uiLogger, audioLogger, apiLogger } from '@/lib/frontend-logger';
 import { audioConverter } from '@/lib/audio-converter';
 import { ContinuousAudioRecorder } from '@/lib/continuous-audio-recorder';
+import { RawPCMRecorder } from '@/lib/raw-pcm-recorder';
 import {
     Download,
     FileText,
@@ -175,6 +175,7 @@ const COMMAND_CONFIGS: CommandConfig[] = [
     }
 ];
 
+
 export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
     const [selectedCommand, setSelectedCommand] = useState<CommandType>('file_transcription');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -184,7 +185,6 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
     const [error, setError] = useState<string | null>(null);
     const [recordingDuration, setRecordingDuration] = useState(0);
     const [showMetrics, setShowMetrics] = useState(false);
-    const [useOptimizedRecorder, setUseOptimizedRecorder] = useState(true); // Use optimized recorder by default
     const [isDiarizationProcessing, setIsDiarizationProcessing] = useState(false);
     const [audioLevel, setAudioLevel] = useState(0);
     const [recordingStatus, setRecordingStatus] = useState('');
@@ -200,13 +200,55 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
         }
     });
 
-    const audioRecorderRef = useRef<AudioRecorder | null>(null);
     const continuousAudioRecorderRef = useRef<ContinuousAudioRecorder | null>(null);
+    const rawPcmRecorderRef = useRef<RawPCMRecorder | null>(null);
     const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const apiClientRef = useRef<GroqAPIClient | null>(null);
     const recordingStartTimeRef = useRef<number | null>(null);
 
     const currentConfig = COMMAND_CONFIGS.find(cmd => cmd.id === selectedCommand);
+
+    // Helper function to analyze audio quality (like speech_demo.py) - safe for large arrays
+    const analyzeAudioQuality = (pcmData: Float32Array, sampleRate: number, label: string) => {
+        const duration = pcmData.length / sampleRate;
+        const rms = Math.sqrt(pcmData.reduce((sum, val) => sum + val * val, 0) / pcmData.length);
+        const rmsDb = 20 * Math.log10(rms + 1e-10);
+        
+        // Find max/min safely for large arrays (avoid spread operator)
+        let max = -Infinity;
+        let min = Infinity;
+        let nonZeroSamples = 0;
+        
+        for (let i = 0; i < pcmData.length; i++) {
+            const val = pcmData[i];
+            if (val > max) max = val;
+            if (val < min) min = val;
+            if (Math.abs(val) > 1e-6) nonZeroSamples++;
+        }
+        
+        const peak = Math.max(Math.abs(max), Math.abs(min));
+        const peakDb = 20 * Math.log10(peak + 1e-10);
+        const nonZeroPercent = (nonZeroSamples / pcmData.length) * 100;
+        
+        console.log(`🔍 Audio Analysis [${label}]:`, {
+            samples: pcmData.length,
+            duration: duration.toFixed(2) + 's',
+            sampleRate: sampleRate,
+            rms: rms.toFixed(6),
+            rmsDb: rmsDb.toFixed(2) + ' dB',
+            peak: peak.toFixed(6),
+            peakDb: peakDb.toFixed(2) + ' dB',
+            range: `[${min.toFixed(6)}, ${max.toFixed(6)}]`,
+            nonZeroSamples: nonZeroSamples,
+            nonZeroPercent: nonZeroPercent.toFixed(1) + '%',
+            quality: rms > 0.01 ? 'GOOD' : rms > 0.001 ? 'FAIR' : 'POOR'
+        });
+        
+        return {
+            rms, rmsDb, peak, peakDb, duration, nonZeroPercent,
+            quality: rms > 0.01 ? 'GOOD' : rms > 0.001 ? 'FAIR' : 'POOR'
+        };
+    };
 
     useEffect(() => {
         apiClientRef.current = new GroqAPIClient();
@@ -215,6 +257,10 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
         return () => {
             if (durationIntervalRef.current) {
                 clearInterval(durationIntervalRef.current);
+            }
+            if (rawPcmRecorderRef.current) {
+                rawPcmRecorderRef.current.stop().catch(console.error);
+                rawPcmRecorderRef.current = null;
             }
         };
     }, []);
@@ -248,71 +294,84 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
             // Record the start time for accurate duration calculation
             recordingStartTimeRef.current = Date.now();
 
-            if (useOptimizedRecorder) {
-                // Use optimized recorder for large files
-                console.log('🎤 Using optimized recorder for single mode');
-                
-                if (!audioRecorderRef.current) {
-                    audioRecorderRef.current = new AudioRecorder({
-                        chunkInterval: 1000, // 1 second chunks
-                        onChunk: async (chunk: Blob, chunkIndex: number) => {
-                            console.log('📦 Optimized audio chunk received', {
-                                chunkIndex: chunkIndex,
-                                chunkSize: chunk.size,
-                                chunkType: chunk.type,
-                                recordingDuration: audioRecorderRef.current?.getStatus().duration || 0
-                            });
-                            
-                            // Note: Continuous mode now uses ContinuousAudioRecorder with VAD
-                            // This onChunk callback is only used for single mode
-                        },
-                        onRecordingComplete: async (audioBlob: Blob, duration: number) => {
-                            console.log('✅ Optimized recording completed', {
-                                audioSize: audioBlob.size,
-                                duration: duration,
-                                audioSizeMB: (audioBlob.size / (1024 * 1024)).toFixed(2) + ' MB'
-                            });
-                            
-                            // Stop the duration timer
-                            if (durationIntervalRef.current) {
-                                clearInterval(durationIntervalRef.current);
-                                durationIntervalRef.current = null;
-                            }
-                            
-                            // Process the audio using optimized converter
-                            await processOptimizedAudio(audioBlob, duration);
-                        },
-                        onError: (error: Error) => {
-                            console.error('❌ Optimized recording error:', error);
-                            setError(`Recording error: ${error.message}`);
-                            setIsRecording(false);
-                            
-                            // Stop the duration timer
-                            if (durationIntervalRef.current) {
-                                clearInterval(durationIntervalRef.current);
-                                durationIntervalRef.current = null;
-                            }
-                        }
+            // Always use optimized RawPCMRecorder for single mode
+            console.log('🎤 Using raw PCM recorder for single mode');
+
+            rawPcmRecorderRef.current = new RawPCMRecorder({
+                sampleRate: 16000, // Target 16kHz for API (will resample from device rate)
+                bufferSize: 8192,  // Larger buffer for better quality
+                onData: (chunk) => {
+                    const rms = Math.sqrt(chunk.reduce((sum, val) => sum + val * val, 0) / chunk.length);
+                    audioLogger.debug('Raw PCM chunk captured', {
+                        chunkSamples: chunk.length,
+                        rms: rms,
+                        rmsDb: 20 * Math.log10(rms + 1e-10) // Convert to dB
                     });
+                },
+                onError: (error) => {
+                    console.error('❌ Raw PCM recording error:', error);
+                    setError(`Recording error: ${error.message}`);
+                    setIsRecording(false);
+                },
+                onComplete: async (pcmData, sampleRate, durationMs) => {
+                    const durationSeconds = durationMs / 1000;
+                    
+                    // Analyze audio quality (like speech_demo.py)
+                    const audioAnalysis = analyzeAudioQuality(pcmData, sampleRate, 'Raw PCM Capture');
+
+                    if (durationIntervalRef.current) {
+                        clearInterval(durationIntervalRef.current);
+                        durationIntervalRef.current = null;
+                    }
+
+                    if (pcmData.length === 0) {
+                        setError('No audio data captured. Please try recording again.');
+                        setIsRecording(false);
+                        return;
+                    }
+
+                    if (durationSeconds < 0.5) {
+                        setError('Recording too short. Please record for at least 0.5 seconds.');
+                        setIsRecording(false);
+                        return;
+                    }
+
+                    // Check if audio is too quiet (like the CLI issue)
+                    if (audioAnalysis.quality === 'POOR') {
+                        setError(`Audio too quiet (RMS: ${audioAnalysis.rms.toFixed(6)}). Please speak louder or check microphone settings.`);
+                        setIsRecording(false);
+                        return;
+                    }
+
+                    try {
+                        // Log detailed analysis for debugging
+                        uiLogger.info('🔍 Raw PCM Analysis', {
+                            samples: pcmData.length,
+                            sampleRate: sampleRate,
+                            duration: durationSeconds,
+                            rms: audioAnalysis.rms,
+                            rmsDb: audioAnalysis.rmsDb,
+                            peak: audioAnalysis.peak,
+                            peakDb: audioAnalysis.peakDb,
+                            nonZeroPercent: audioAnalysis.nonZeroPercent,
+                            quality: audioAnalysis.quality
+                        });
+
+                        // Process directly at 16kHz (resampled by RawPCMRecorder)
+                        await processSingleRecognitionMicrophone(pcmData, sampleRate);
+                    } catch (err) {
+                        console.error('❌ Error processing raw PCM audio:', err);
+                        setError(`Failed to process audio: ${err instanceof Error ? err.message : String(err)}`);
+                        setIsProcessing(false);
+                    }
                 }
+            });
 
-                audioLogger.info('AudioRecorder initialized (optimized mode)', {
-                    recorderType: 'AudioRecorder',
-                    mode: currentConfig.mode,
-                    isOptimized: true
-                });
-            } else {
-                // Use legacy recorder for backward compatibility
-                console.log('🎤 Using legacy recorder for single mode');
-                
-                const audioRecorder = new AudioRecorder();
-                audioRecorderRef.current = audioRecorder;
-
-                audioLogger.info('AudioRecorder initialized', {
-                    recorderType: 'AudioRecorder',
-                    mode: currentConfig.mode
-                });
-            }
+            await rawPcmRecorderRef.current.start();
+            audioLogger.info('RawPCMRecorder initialized', {
+                recorderType: 'RawPCMRecorder',
+                mode: currentConfig.mode
+            });
 
             // Start duration timer
             durationIntervalRef.current = setInterval(() => {
@@ -347,36 +406,14 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
 
                 await continuousAudioRecorderRef.current.startRecording();
                 console.log('🎤 Continuous recording started with VAD-based silence detection');
-            } else {
-                // For single mode, start recording with the appropriate recorder
-                if (useOptimizedRecorder && audioRecorderRef.current) {
-                    // Use optimized recorder
-                    await audioRecorderRef.current.startOptimizedRecording();
-                    console.log('🎤 Optimized recording started for single mode');
-                } else if (audioRecorderRef.current) {
-                    // Use legacy recorder
-                    audioRecorderRef.current.setOnDataAvailable((chunk: Blob) => {
-                        audioLogger.debug('Audio chunk received for single mode', {
-                            chunkSize: chunk.size,
-                            chunkType: chunk.type,
-                            timestamp: new Date().toISOString()
-                        });
-                    });
-
-                    await audioRecorderRef.current.startRecording();
-                    audioLogger.success('Audio recording started for single mode', {
-                        mode: 'single',
-                        operation: currentConfig.operation,
-                        diarization: currentConfig.diarization
-                    });
-                }
             }
+            // Single mode is already handled above with RawPCMRecorder
         } catch (err) {
             uiLogger.error('Recording failed', { error: err, command: currentConfig.id });
             setError(`Recording failed: ${err}`);
             setIsRecording(false);
         }
-    }, [currentConfig, useOptimizedRecorder]);
+    }, [currentConfig]);
 
     const stopRecording = useCallback(async () => {
         // Calculate actual duration from start time
@@ -403,176 +440,14 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
             timestamp: new Date().toISOString()
         });
 
-        if (useOptimizedRecorder && audioRecorderRef.current) {
-            // Use optimized recorder
-            console.log('🛑 Stopping optimized recording...');
-            audioRecorderRef.current.stopRecording();
-        } else if (audioRecorderRef.current) {
-            // Use legacy recorder
-            console.log('🛑 Stopping legacy recording...');
-            
-            // For single recognition, we need to get the audio data and send it
-            if (currentConfig?.mode === 'single') {
-                try {
-                    // Stop the audio recording first
-                    audioRecorderRef.current.stopRecording();
-                    audioLogger.success('Audio recording stopped for single mode');
-                    
-                    // Get the recorded audio data
-                    const audioBlob = await audioRecorderRef.current.getAudioBlob();
-                    
-                    // Calculate actual duration from start time
-                    const actualDuration = recordingStartTimeRef.current 
-                        ? (Date.now() - recordingStartTimeRef.current) / 1000 
-                        : recordingDuration;
-                    
-                    audioLogger.info('Retrieved audio blob for single recognition', {
-                        blobSize: audioBlob.size,
-                        blobType: audioBlob.type,
-                        stateDuration: recordingDuration,
-                        actualDuration: actualDuration,
-                        startTime: recordingStartTimeRef.current,
-                        endTime: Date.now()
-                    });
-                    
-                    if (audioBlob.size === 0) {
-                        uiLogger.error('No audio data captured', { blobSize: audioBlob.size });
-                        setError('No audio data captured. Please try recording again.');
-                        setIsRecording(false);
-                        return;
-                    }
-                    
-                    // Check if we have enough audio data (at least 0.5 seconds)
-                    // Use the actual calculated duration instead of state duration
-                    if (actualDuration < 0.5) {
-                        uiLogger.warning('Recording too short', { 
-                            stateDuration: recordingDuration,
-                            actualDuration: actualDuration,
-                            minimumRequired: 0.5 
-                        });
-                        setError('Recording too short. Please record for at least 0.5 seconds.');
-                        setIsRecording(false);
-                        return;
-                    }
-                    
-                    // Convert to base64 using chunked approach to avoid stack overflow
-                    const arrayBuffer = await audioBlob.arrayBuffer();
-                    const uint8Array = new Uint8Array(arrayBuffer);
-                    
-                    audioLogger.debug('Audio blob conversion details', {
-                        originalSize: audioBlob.size,
-                        blobType: audioBlob.type,
-                        arrayBufferLength: arrayBuffer.byteLength,
-                        uint8ArrayLength: uint8Array.length,
-                        stateDuration: recordingDuration,
-                        actualDuration: actualDuration
-                    });
-                    
-                    // Convert WebM/Opus audio to raw PCM data
-                    console.log('🔄 Converting WebM/Opus audio to PCM format');
-                    uiLogger.info('🔄 Audio Conversion: WebM to PCM', {
-                        action: 'audio_conversion',
-                        inputSize: audioBlob.size,
-                        inputType: audioBlob.type,
-                        step: 'webm_to_pcm',
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    const conversionResult = await audioConverter.convertToPCM(audioBlob);
-                    
-                    // Convert PCM data to base64 for transmission
-                    console.log('🔄 Converting PCM to base64 for transmission');
-                    uiLogger.info('🔄 Audio Conversion: PCM to Base64', {
-                        action: 'audio_conversion',
-                        pcmSize: conversionResult.pcmData.length,
-                        sampleRate: conversionResult.sampleRate,
-                        step: 'pcm_to_base64',
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    // Use optimized base64 conversion for WebSocket transmission
-                    const base64Audio = audioConverter.convertPCMToBase64(conversionResult.pcmData);
-                    
-                    audioLogger.success('Audio converted to PCM and base64', {
-                        originalSize: conversionResult.originalSize,
-                        originalSizeMB: (conversionResult.originalSize / (1024 * 1024)).toFixed(2) + ' MB',
-                        pcmLength: conversionResult.pcmData.length,
-                        pcmDuration: (conversionResult.pcmData.length / conversionResult.sampleRate).toFixed(2) + 's',
-                        base64Length: base64Audio.length,
-                        base64LengthMB: (base64Audio.length / (1024 * 1024)).toFixed(2) + ' MB',
-                        sampleRate: conversionResult.sampleRate,
-                        duration: conversionResult.duration,
-                        durationMinutes: (conversionResult.duration / 60).toFixed(2) + ' min',
-                        compressionRatio: (base64Audio.length / conversionResult.originalSize).toFixed(2),
-                        expectedPCMLength: Math.floor(conversionResult.duration * conversionResult.sampleRate),
-                        pcmLengthMatch: conversionResult.pcmData.length === Math.floor(conversionResult.duration * conversionResult.sampleRate) ? '✅ MATCH' : '❌ MISMATCH'
-                    });
-                    
-                    // Now set up WebSocket connection and send the audio data
-                    uiLogger.dataFlow('UI', 'WebSocket', { 
-                        audioLength: base64Audio.length,
-                        operation: currentConfig.operation,
-                        diarization: currentConfig.diarization,
-                        actualDuration: actualDuration
-                    }, 'Single recognition audio data');
-                    
-                    // Log to terminal for debugging
-                    uiLogger.info('📤 WebSocket Data Transmission', {
-                        action: 'websocket_transmission',
-                        audioLength: base64Audio.length,
-                        audioLengthMB: (base64Audio.length / (1024 * 1024)).toFixed(2) + ' MB',
-                        operation: currentConfig.operation,
-                        diarization: currentConfig.diarization,
-                        actualDuration: actualDuration,
-                        actualDurationMinutes: (actualDuration / 60).toFixed(2) + ' min',
-                        pcmLength: conversionResult.pcmData.length,
-                        pcmDuration: (conversionResult.pcmData.length / conversionResult.sampleRate).toFixed(2) + 's',
-                        sampleRate: conversionResult.sampleRate,
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    await processSingleRecognitionMicrophone(conversionResult.pcmData, conversionResult.sampleRate);
-                    
-                } catch (error) {
-                    console.error('❌ Error processing audio data:', error);
-                    console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-                    console.error('❌ Error details:', {
-                        name: error instanceof Error ? error.name : 'Unknown',
-                        message: error instanceof Error ? error.message : String(error),
-                        cause: error instanceof Error ? error.cause : undefined
-                    });
-                    
-                    uiLogger.error('Error processing audio data', { 
-                        error: error instanceof Error ? {
-                            name: error.name,
-                            message: error.message,
-                            stack: error.stack,
-                            cause: error.cause
-                        } : {
-                            type: typeof error,
-                            value: String(error)
-                        },
-                        mode: 'single',
-                        stateDuration: recordingDuration,
-                        actualDuration: actualDuration
-                    });
-                    
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    setError(`Failed to process audio: ${errorMessage}`);
-                    setIsProcessing(false);
-                    setIsRecording(false);
-                }
-            } else if (currentConfig?.mode === 'continuous' && continuousAudioRecorderRef.current) {
-                // For continuous mode, stop the continuous audio recorder
-                audioLogger.info('Stopping continuous recording mode with VAD');
-                await continuousAudioRecorderRef.current.stopRecording();
-            } else {
-                // For continuous mode, just stop recording
-                audioLogger.info('Stopping continuous recording mode');
-                if (audioRecorderRef.current) {
-                    audioRecorderRef.current.stopRecording();
-                }
-            }
+        if (rawPcmRecorderRef.current) {
+            console.log('🛑 Stopping raw PCM recording...');
+            await rawPcmRecorderRef.current.stop();
+            rawPcmRecorderRef.current = null;
+        } else if (currentConfig?.mode === 'continuous' && continuousAudioRecorderRef.current) {
+            // For continuous mode, stop the continuous audio recorder
+            audioLogger.info('Stopping continuous recording mode with VAD');
+            await continuousAudioRecorderRef.current.stopRecording();
         }
         
         if (durationIntervalRef.current) {
@@ -588,61 +463,6 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
             setIsRecording(false);
         }
     }, [currentConfig]);
-
-    const processOptimizedAudio = async (audioBlob: Blob, duration: number) => {
-        try {
-            console.log('🔄 Processing optimized audio', {
-                audioSize: audioBlob.size,
-                duration: duration,
-                audioSizeMB: (audioBlob.size / (1024 * 1024)).toFixed(2) + ' MB'
-            });
-
-            // Convert audio to PCM and base64 using optimized method
-            const conversionResult = await audioConverter.convertToPCMOptimized(audioBlob);
-            
-            console.log('✅ Optimized audio conversion completed', {
-                pcmLength: conversionResult.pcmData.length,
-                sampleRate: conversionResult.sampleRate,
-                duration: conversionResult.duration,
-                base64Length: conversionResult.base64Data.length,
-                base64LengthMB: (conversionResult.base64Data.length / (1024 * 1024)).toFixed(2) + ' MB'
-            });
-
-            // Log the data being sent to backend
-            console.log('📤 Frontend sending data to backend', {
-              base64Length: conversionResult.base64Data.length,
-              base64LengthMB: (conversionResult.base64Data.length / (1024 * 1024)).toFixed(2) + ' MB',
-              pcmLength: conversionResult.pcmData.length,
-              duration: conversionResult.duration,
-              durationMinutes: (conversionResult.duration / 60).toFixed(2) + ' min',
-              sampleRate: conversionResult.sampleRate,
-              originalSize: conversionResult.originalSize,
-              originalSizeMB: (conversionResult.originalSize / (1024 * 1024)).toFixed(2) + ' MB'
-            });
-
-            // Log to terminal for debugging
-            uiLogger.info('📤 Frontend Data Transmission', {
-              action: 'frontend_data_transmission',
-              base64Length: conversionResult.base64Data.length,
-              base64LengthMB: (conversionResult.base64Data.length / (1024 * 1024)).toFixed(2) + ' MB',
-              pcmLength: conversionResult.pcmData.length,
-              duration: conversionResult.duration,
-              durationMinutes: (conversionResult.duration / 60).toFixed(2) + ' min',
-              sampleRate: conversionResult.sampleRate,
-              originalSize: conversionResult.originalSize,
-              originalSizeMB: (conversionResult.originalSize / (1024 * 1024)).toFixed(2) + ' MB',
-              timestamp: new Date().toISOString()
-            });
-
-            // Process the audio using the microphone REST API (like speech_demo.py)
-            await processSingleRecognitionMicrophone(conversionResult.pcmData, conversionResult.sampleRate);
-
-        } catch (error) {
-            console.error('❌ Optimized audio processing failed:', error);
-            setError(`Audio processing failed: ${error instanceof Error ? error.message : String(error)}`);
-            setIsProcessing(false);
-        }
-    };
 
     const processSingleRecognitionMicrophone = async (pcmData: Float32Array, sampleRate: number) => {
         try {
@@ -670,8 +490,18 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                 diarization: currentConfig?.diarization
             });
 
+            // Analyze audio quality before API call
+            const audioAnalysis = analyzeAudioQuality(pcmData, sampleRate, 'Before API Call');
+
             // Convert Float32Array to regular array for JSON serialization - EXACTLY like speech_demo.py
-            const audioArray = Array.from(pcmData);
+            // Use chunked conversion to avoid stack overflow for large arrays
+            const audioArray: number[] = [];
+            const chunkSize = 8192; // Process 8KB chunks at a time
+            
+            for (let i = 0; i < pcmData.length; i += chunkSize) {
+                const chunk = pcmData.slice(i, i + chunkSize);
+                audioArray.push(...Array.from(chunk));
+            }
 
             // Send to single microphone endpoint - EXACTLY like speech_demo.py process_microphone_single
             const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -787,7 +617,14 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
             });
 
             // Convert Float32Array to regular array for JSON serialization - EXACTLY like speech_demo.py
-            const audioArray = Array.from(pcmData);
+            // Use chunked conversion to avoid stack overflow for large arrays
+            const audioArray: number[] = [];
+            const chunkSize = 8192; // Process 8KB chunks at a time
+            
+            for (let i = 0; i < pcmData.length; i += chunkSize) {
+                const chunk = pcmData.slice(i, i + chunkSize);
+                audioArray.push(...Array.from(chunk));
+            }
 
             // Send to continuous microphone endpoint - EXACTLY like speech_demo.py process_microphone_continuous
             const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -1214,20 +1051,13 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                         </button>
                     </div>
                     
-                    {/* Optimized Recorder Toggle */}
-                    <div className="flex items-center space-x-2 p-3 bg-gray-50 rounded-lg border">
-                        <input
-                            type="checkbox"
-                            id="optimized-recorder"
-                            checked={useOptimizedRecorder}
-                            onChange={(e) => setUseOptimizedRecorder(e.target.checked)}
-                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                        <label htmlFor="optimized-recorder" className="text-sm text-gray-700 cursor-pointer">
-                            🚀 Use Optimized Recorder (for 60+ min recordings)
-                        </label>
-                        <div className="text-xs text-gray-500 ml-2">
-                            {useOptimizedRecorder ? '✅ Enabled' : '❌ Disabled'}
+                    {/* Audio Recording Info */}
+                    <div className="flex items-center space-x-2 p-3 bg-blue-50 rounded-lg border">
+                        <div className="text-sm text-blue-700">
+                            🎤 Raw PCM Recording (16kHz, resampled from device rate)
+                        </div>
+                        <div className="text-xs text-blue-500 ml-2">
+                            ✅ Optimized for speech recognition
                         </div>
                     </div>
                 </div>

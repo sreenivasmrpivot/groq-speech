@@ -9,6 +9,7 @@ set -e  # Exit on any error
 # Default values
 VERBOSE=false
 HELP=false
+LOG_FILE=""
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -20,6 +21,18 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             HELP=true
             shift
+            ;;
+        --clean|-c)
+            echo "🧹 Cleaning up existing processes..."
+            pkill -f "python.*api" 2>/dev/null || true
+            pkill -f "uvicorn" 2>/dev/null || true
+            pkill -f "npm.*dev" 2>/dev/null || true
+            pkill -f "node.*https" 2>/dev/null || true
+            lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+            lsof -ti:3443 | xargs kill -9 2>/dev/null || true
+            lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+            echo "✅ All processes cleaned up"
+            exit 0
             ;;
         *)
             echo "Unknown option: $1"
@@ -38,16 +51,19 @@ if [ "$HELP" = true ]; then
     echo "Options:"
     echo "  --verbose, -v    Enable verbose logging for all components"
     echo "  --help, -h       Show this help message"
+    echo "  --clean, -c      Clean up existing processes and exit"
     echo ""
     echo "Examples:"
     echo "  $0                # Run in normal mode (HTTPS for microphone access)"
     echo "  $0 --verbose      # Run with verbose logging"
+    echo "  $0 --clean        # Clean up existing processes"
     echo ""
     echo "Note: Frontend runs on HTTPS (https://localhost:3443) to enable microphone access."
     echo "      Your browser will show a security warning for the self-signed certificate."
     echo "      Click 'Advanced' and 'Proceed to localhost' to continue."
     exit 0
 fi
+
 
 echo "🚀 Starting Groq Speech SDK Development Environment..."
 if [ "$VERBOSE" = true ]; then
@@ -153,6 +169,12 @@ start_backend() {
         export GROQ_VERBOSE=true
         export GROQ_LOG_LEVEL=DEBUG
         print_status "Backend verbose logging enabled"
+        
+        # Create log file with timestamp for both backend and frontend
+        LOG_FILE="logs/verbose-$(date +%Y%m%d-%H%M%S).log"
+        mkdir -p logs
+        touch "$LOG_FILE"  # Create the file immediately
+        echo "📝 Verbose logs will be saved to: $LOG_FILE"
     fi
     
     # Start backend in background with appropriate logging
@@ -160,6 +182,7 @@ start_backend() {
         print_status "Starting backend with verbose logging..."
         python -m api.server 2>&1 | while IFS= read -r line; do
             echo -e "${BLUE}[BACKEND]${NC} $line"
+            echo "[BACKEND] $line" >> "$LOG_FILE"
         done &
         BACKEND_PID=$!
     else
@@ -202,8 +225,16 @@ start_frontend() {
     # Start frontend with HTTPS support for microphone access
     if [ "$VERBOSE" = true ]; then
         print_status "Starting frontend with HTTPS and verbose logging..."
+        # Ensure logs directory and log file exist before writing to it
+        if [ -n "$LOG_FILE" ]; then
+            mkdir -p "$(dirname "$LOG_FILE")"
+            touch "$LOG_FILE"
+        fi
         NEXT_PUBLIC_VERBOSE=true NEXT_PUBLIC_DEBUG=true NEXT_PUBLIC_LOG_LEVEL=DEBUG npm run dev:https 2>&1 | while IFS= read -r line; do
             echo -e "${GREEN}[FRONTEND]${NC} $line"
+            if [ -n "$LOG_FILE" ]; then
+                echo "[FRONTEND] $line" >> "$LOG_FILE"
+            fi
         done &
         FRONTEND_PID=$!
     else
@@ -248,6 +279,29 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
+# Kill existing processes
+kill_existing_processes() {
+    print_status "Cleaning up existing processes..."
+    
+    # Kill existing backend processes
+    pkill -f "python.*api" 2>/dev/null || true
+    pkill -f "uvicorn" 2>/dev/null || true
+    
+    # Kill existing frontend processes
+    pkill -f "npm.*dev" 2>/dev/null || true
+    pkill -f "node.*https" 2>/dev/null || true
+    
+    # Kill processes on specific ports
+    lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    lsof -ti:3443 | xargs kill -9 2>/dev/null || true
+    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+    
+    # Wait a moment for processes to fully terminate
+    sleep 2
+    
+    print_success "Existing processes cleaned up"
+}
+
 # Main execution
 main() {
     print_status "Checking environment..."
@@ -256,6 +310,9 @@ main() {
     print_status "Installing dependencies..."
     install_python_deps
     install_node_deps
+    
+    print_status "Cleaning up existing processes..."
+    kill_existing_processes
     
     print_status "Starting services..."
     start_backend
@@ -270,6 +327,8 @@ main() {
     if [ "$VERBOSE" = true ]; then
         echo "🔍 Verbose logging enabled - all component logs are shown above"
         echo "📝 Logs are prefixed with [BACKEND] and [FRONTEND] for easy identification"
+        echo "📄 Complete verbose log saved to: $LOG_FILE"
+        echo "💡 To share logs for analysis, send the file: $LOG_FILE"
     else
         echo "📝 Logs are saved to backend.log and frontend.log"
         echo "💡 Use --verbose flag to see real-time logs: ./run-dev.sh --verbose"

@@ -418,8 +418,8 @@ class AudioProcessor(IAudioProcessor):
                 audio_data,
             )
         
-        # Apply noise filtering for better recognition quality
-        if self.vad_service:
+        # Apply noise filtering for better recognition quality (only if enabled in VAD config)
+        if self.vad_service and self.vad_service.config.enable_noise_filtering:
             audio_data = self.vad_service._apply_noise_filtering(audio_data, 16000)
         
         return audio_data

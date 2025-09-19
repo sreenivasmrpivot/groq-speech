@@ -32,9 +32,11 @@ from pydantic import BaseModel, Field
 # Add the parent directory to the path to import the SDK
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Load environment variables from groq_speech/.env
+# Load environment variables from project root .env
 from dotenv import load_dotenv
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "groq_speech", ".env")
+
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_path = os.path.join(project_root, ".env")
 if os.path.exists(env_path):
     load_dotenv(env_path)
     print(f"✅ Loaded environment variables from {env_path}")
@@ -42,6 +44,7 @@ if os.path.exists(env_path):
     print(f"🔍 HF_TOKEN: {'SET' if os.getenv('HF_TOKEN') else 'NOT SET'}")
 else:
     print(f"⚠️  Environment file not found: {env_path}")
+    print("💡 Create a .env file in the project root using .env.template as a guide")
 
 # Import groq_speech after adding to path
 from groq_speech import (
@@ -580,6 +583,57 @@ async def recognize_microphone_single(request: dict):
         print(f"📊 Microphone audio: {len(audio_array)} samples, {sample_rate}Hz")
         print(f"📊 Duration: {len(audio_array) / sample_rate:.2f} seconds")
 
+        # Persist a debug copy of the captured microphone audio so we can
+        # compare it with CLI captures when investigating quality issues.
+        try:
+            debug_dir = os.path.join(project_root, "debug_audio")
+            os.makedirs(debug_dir, exist_ok=True)
+            temp_path = AudioFormatUtils.save_audio_to_temp_file(audio_array, sample_rate)
+            debug_filename = os.path.join(
+                debug_dir,
+                f"ui_mic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav",
+            )
+            os.replace(temp_path, debug_filename)
+            api_logger.info("💾 Saved debug UI microphone capture", {
+                "path": debug_filename,
+                "samples": len(audio_array),
+                "sample_rate": sample_rate
+            })
+        except Exception as debug_error:
+            api_logger.warning("⚠️ Failed to save UI microphone debug audio", {
+                "error": str(debug_error)
+            })
+
+        # Log a short preview of the first samples for debugging
+        try:
+            preview_count = min(10, len(audio_array))
+            preview_values = [float(x) for x in audio_array[:preview_count]]
+            api_logger.debug("🔍 Audio sample preview", {
+                "preview": preview_values,
+                "preview_count": preview_count
+            })
+        except Exception as preview_error:
+            api_logger.warning("⚠️ Failed to log audio sample preview", {
+                "error": str(preview_error)
+            })
+
+        # DEBUG: Check audio data quality
+        print(f"🔍 DEBUG: Audio array shape: {audio_array.shape}")
+        print(f"🔍 DEBUG: Audio array dtype: {audio_array.dtype}")
+        print(f"🔍 DEBUG: Audio array min/max: {audio_array.min():.6f} / {audio_array.max():.6f}")
+        print(f"🔍 DEBUG: Audio array mean: {audio_array.mean():.6f}")
+        print(f"🔍 DEBUG: Non-zero samples: {np.count_nonzero(audio_array)}")
+        print(f"🔍 DEBUG: Audio array size in MB: {(len(audio_array) * 4) / (1024 * 1024):.2f}")
+        
+        # Check if audio has any actual content (not just silence)
+        audio_rms = np.sqrt(np.mean(audio_array**2))
+        print(f"🔍 DEBUG: Audio RMS level: {audio_rms:.6f}")
+        
+        if audio_rms < 0.001:
+            print("⚠️ WARNING: Audio appears to be mostly silence or very quiet!")
+        else:
+            print("✅ Audio has detectable content")
+
         # Setup speech configuration using SDK factory
         speech_config = get_speech_config(
             model="whisper-large-v3-turbo",
@@ -850,10 +904,29 @@ async def vad_get_audio_level(request: VADRequest):
 
 
 if __name__ == "__main__":
+    # Load API-specific environment variables
+    api_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(api_env_path):
+        load_dotenv(api_env_path)
+        print(f"✅ Loaded API-specific environment variables from {api_env_path}")
+    
+    # Get API configuration from environment variables
+    api_host = os.getenv("API_HOST", "0.0.0.0")
+    api_port = int(os.getenv("API_PORT", "8000"))
+    api_workers = int(os.getenv("API_WORKERS", "1"))
+    api_log_level = os.getenv("API_LOG_LEVEL", "info").lower()
+    
     print("🚀 Starting Groq Speech API Server...")
-    print("📖 API Documentation: http://localhost:8000/docs")
-    print("🔍 Health Check: http://localhost:8000/health")
+    print(f"📖 API Documentation: http://{api_host}:{api_port}/docs")
+    print(f"🔍 Health Check: http://{api_host}:{api_port}/health")
+    print(f"🌐 Server: {api_host}:{api_port}")
+    print(f"👥 Workers: {api_workers}")
 
     uvicorn.run(
-        "api.server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
+        "api.server:app", 
+        host=api_host, 
+        port=api_port, 
+        workers=api_workers,
+        reload=True, 
+        log_level=api_log_level
     )

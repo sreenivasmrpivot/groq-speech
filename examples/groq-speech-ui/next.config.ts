@@ -13,10 +13,12 @@ const nextConfig: NextConfig = {
   },
   // Expose environment variables to the client
   env: {
-    NEXT_PUBLIC_VERBOSE: process.env.NEXT_VERBOSE,
-    NEXT_PUBLIC_DEBUG: process.env.NEXT_DEBUG,
+    NEXT_PUBLIC_VERBOSE: process.env.NEXT_PUBLIC_VERBOSE,
+    NEXT_PUBLIC_DEBUG: process.env.NEXT_PUBLIC_DEBUG,
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
-    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
+    NEXT_PUBLIC_FRONTEND_URL: process.env.NEXT_PUBLIC_FRONTEND_URL,
+    NEXT_DEV_MODE: process.env.NEXT_DEV_MODE,
+    NEXT_HOT_RELOAD: process.env.NEXT_HOT_RELOAD,
   },
   // Enable debugging
   experimental: {

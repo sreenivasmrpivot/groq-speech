@@ -60,10 +60,37 @@
             "sourceMaps": true
         },
         {
+            "name": "Next.js: debug HTTPS server",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev:https"],
+            "envFile": "${workspaceFolder}/examples/groq-speech-ui/.env.local",
+            "cwd": "${workspaceFolder}/examples/groq-speech-ui",
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ],
+            "resolveSourceMapLocations": [
+                "${workspaceFolder}/examples/groq-speech-ui/**",
+                "!**/node_modules/**"
+            ],
+            "sourceMaps": true,
+            "env": {
+                "NEXT_PUBLIC_API_URL": "http://localhost:8000",
+                "NEXT_PUBLIC_VERBOSE": "true",
+                "NEXT_PUBLIC_DEBUG": "true",
+                "NEXT_DEV_MODE": "true",
+                "NEXT_HOT_RELOAD": "true",
+                "NEXT_PUBLIC_FRONTEND_URL": "https://localhost:3443"
+            }
+        },
+        {
             "name": "Next.js: debug client-side",
             "type": "chrome",
             "request": "launch",
-            "url": "http://localhost:3000",
+            "url": "https://localhost:3443",
             "webRoot": "${workspaceFolder}/examples/groq-speech-ui",
             "sourceMaps": true,
             "userDataDir": "${workspaceFolder}/.vscode/chrome-debug-${workspaceFolderBasename}-${timestamp}",
@@ -81,7 +108,19 @@
                 "--new-window",
                 "--force-new-window",
                 "--no-sandbox",
-                "--disable-setuid-sandbox"
+                "--disable-setuid-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--remote-debugging-port=0",
+                "--disable-background-mode",
+                "--disable-component-extensions-with-background-pages",
+                "--disable-translate",
+                "--hide-scrollbars",
+                "--no-pings",
+                "--single-process",
+                "--ignore-certificate-errors",
+                "--ignore-ssl-errors",
+                "--allow-running-insecure-content"
             ]
         },
         {
@@ -130,6 +169,31 @@
             "sourceMaps": true
         },
         {
+            "name": "Next.js: debug with HTTPS (Microphone Access)",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--inspect"],
+            "args": ["${workspaceFolder}/examples/groq-speech-ui/scripts/https-dev-server.js"],
+            "envFile": "${workspaceFolder}/examples/groq-speech-ui/.env.local",
+            "cwd": "${workspaceFolder}/examples/groq-speech-ui",
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ],
+            "resolveSourceMapLocations": [
+                "${workspaceFolder}/examples/groq-speech-ui/**",
+                "!**/node_modules/**"
+            ],
+            "sourceMaps": true,
+            "presentation": {
+                "hidden": false,
+                "group": "Next.js Debug",
+                "order": 2
+            }
+        },
+        {
             "name": "Attach to Frontend (Next.js)",
             "type": "node",
             "request": "attach",
@@ -151,7 +215,7 @@
             "name": "Debug Frontend (Browser)",
             "type": "chrome",
             "request": "launch",
-            "url": "http://localhost:3000",
+            "url": "https://localhost:3443",
             "webRoot": "${workspaceFolder}/examples/groq-speech-ui",
             "sourceMaps": true,
             "userDataDir": "${workspaceFolder}/.vscode/chrome-debug-${workspaceFolderBasename}-${timestamp}",
@@ -170,14 +234,25 @@
                 "--force-new-window",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--remote-debugging-port=0"
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--remote-debugging-port=0",
+                "--disable-background-mode",
+                "--disable-component-extensions-with-background-pages",
+                "--disable-translate",
+                "--hide-scrollbars",
+                "--no-pings",
+                "--single-process",
+                "--ignore-certificate-errors",
+                "--ignore-ssl-errors",
+                "--allow-running-insecure-content"
             ]
         },
         {
             "name": "Debug Frontend (Edge)",
             "type": "msedge",
             "request": "launch",
-            "url": "http://localhost:3000",
+            "url": "https://localhost:3443",
             "webRoot": "${workspaceFolder}/examples/groq-speech-ui",
             "sourceMaps": true,
             "userDataDir": "${workspaceFolder}/.vscode/edge-debug-${workspaceFolderBasename}-${timestamp}",
@@ -196,7 +271,10 @@
                 "--force-new-window",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--remote-debugging-port=0"
+                "--remote-debugging-port=0",
+                "--ignore-certificate-errors",
+                "--ignore-ssl-errors",
+                "--allow-running-insecure-content"
             ]
         },
         {
@@ -206,7 +284,7 @@
             "port": 9222,
             "webRoot": "${workspaceFolder}/examples/groq-speech-ui",
             "sourceMaps": true,
-            "url": "http://localhost:3000"
+            "url": "https://localhost:3443"
         },
         {
             "name": "Debug Speech Demo - File Non-Diarized",
@@ -368,8 +446,7 @@
             "name": "Debug Full Stack (API + Next.js)",
             "configurations": [
                 "Debug API Server",
-                "Next.js: debug server-side",
-                "Next.js: debug client-side"
+                "Next.js: debug HTTPS server"
             ],
             "stopAll": true,
             "presentation": {
@@ -389,6 +466,32 @@
                 "hidden": false,
                 "group": "Full Stack",
                 "order": 2
+            }
+        },
+        {
+            "name": "Debug Full Stack (Safe Mode)",
+            "configurations": [
+                "Debug API Server Only (Recommended)",
+                "Next.js: debug HTTPS server"
+            ],
+            "stopAll": true,
+            "presentation": {
+                "hidden": false,
+                "group": "Full Stack",
+                "order": 1
+            }
+        },
+        {
+            "name": "Debug Full Stack (HTTPS + Microphone)",
+            "configurations": [
+                "Debug API Server Only (Recommended)",
+                "Next.js: debug HTTPS server"
+            ],
+            "stopAll": true,
+            "presentation": {
+                "hidden": false,
+                "group": "Full Stack",
+                "order": 1
             }
         },
         {

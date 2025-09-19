@@ -79,19 +79,6 @@ export interface ModelConfig {
     enable_segment_timestamps: boolean;
 }
 
-export interface WebSocketMessage {
-    type: 'recognition_started' | 'recognition_stopped' | 'recognition_result' | 'diarization_result' | 'single_recognition_started' | 'error' | 'pong';
-    data?: unknown;
-    error?: string;
-    text?: string;
-    confidence?: number;
-    language?: string;
-    is_translation?: boolean;
-    enable_diarization?: boolean;
-    segments?: DiarizationSegment[];
-    num_speakers?: number;
-}
-
 export interface RecognitionSession {
     id: string;
     mode: RecognitionMode;

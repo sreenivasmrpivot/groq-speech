@@ -3,8 +3,8 @@
 import { ClientOnly } from '@/components/ClientOnly';
 import { DebugPanel } from '@/components/DebugPanel';
 import { EnhancedSpeechDemo } from '@/components/EnhancedSpeechDemo';
-import { GroqAPIClient } from '@/lib/groq-api';
 import { uiLogger } from '@/lib/frontend-logger';
+import { GroqAPIClient } from '@/lib/groq-api';
 import { AlertCircle, CheckCircle, Info, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -13,15 +13,14 @@ export default function Home() {
     const [isConfigured, setIsConfigured] = useState(false);
     const [showBackendConfig, setShowBackendConfig] = useState(false);
     const [backendStatus, setBackendStatus] = useState<'checking' | 'configured' | 'not-configured' | 'error'>('checking');
-    const [, setApiClient] = useState<GroqAPIClient | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isClient, setIsClient] = useState(false);
+    const [apiClient, setApiClient] = useState<GroqAPIClient | null>(null);
 
     useEffect(() => {
         setIsClient(true);
         
         // Test frontend logger explicitly
-        console.log('About to test frontend logger...');
         uiLogger.info('Home page loaded - testing frontend logger', {
             timestamp: new Date().toISOString(),
             location: 'page.tsx',
@@ -60,22 +59,6 @@ export default function Home() {
             const failureHistory = JSON.parse(localStorage.getItem('frontend-log-failures') || '[]');
             
             console.log('=== FRONTEND LOGGING STATUS ===');
-            console.log('Log history entries:', logHistory.length);
-            console.log('Successful backend sends:', successHistory.length);
-            console.log('Failed backend sends:', failureHistory.length);
-            
-            if (logHistory.length > 0) {
-                console.log('Latest log entry:', logHistory[logHistory.length - 1]);
-            }
-            
-            if (successHistory.length > 0) {
-                console.log('Latest success:', successHistory[successHistory.length - 1]);
-            }
-            
-            if (failureHistory.length > 0) {
-                console.log('Latest failure:', failureHistory[failureHistory.length - 1]);
-            }
-            console.log('=== END LOGGING STATUS ===');
         }, 3000);
     }, []);
 

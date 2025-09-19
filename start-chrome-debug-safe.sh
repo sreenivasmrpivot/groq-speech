@@ -1,7 +1,6 @@
 #!/bin/bash
-
 # Safe Chrome Debug Starter
-# This script starts Chrome with debugging enabled, with additional safety checks
+# This script safely starts Chrome with debugging, handling conflicts and crashes
 
 set -e
 
@@ -13,47 +12,49 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-DEBUG_PROFILE_DIR="$HOME/.chrome-debug-profile"
+DEBUG_PROFILE_DIR="$HOME/.chrome-debug-profile-safe"
 CHROME_DEBUG_PORT=9222
 CHROME_DEBUG_URL="http://localhost:3000"
-CHROME_BINARY="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
-echo -e "${BLUE}🚀 Starting Chrome with debugging enabled (Safe Mode)...${NC}"
+echo -e "${BLUE}🚀 Starting Chrome with safe debugging configuration...${NC}"
 
-# Check if Chrome binary exists
-if [ ! -f "$CHROME_BINARY" ]; then
-    echo -e "${RED}❌ Chrome binary not found at: $CHROME_BINARY${NC}"
+# Find Chrome binary
+CHROME_BINARY=""
+if [ -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+    CHROME_BINARY="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+elif [ -f "/Applications/Chromium.app/Contents/MacOS/Chromium" ]; then
+    CHROME_BINARY="/Applications/Chromium.app/Contents/MacOS/Chromium"
+else
+    echo -e "${RED}❌ Chrome not found. Please install Google Chrome or Chromium.${NC}"
     exit 1
 fi
 
-# Check if debug profile exists
-if [ ! -d "$DEBUG_PROFILE_DIR" ]; then
-    echo -e "${RED}❌ Debug profile not found. Please run prepare-chrome-debug.sh first.${NC}"
-    exit 1
-fi
+echo -e "${GREEN}✅ Found Chrome: $CHROME_BINARY${NC}"
 
-# Check if port is available
-if lsof -Pi :$CHROME_DEBUG_PORT -sTCP:LISTEN -t >/dev/null; then
-    echo -e "${YELLOW}⚠️ Port $CHROME_DEBUG_PORT is already in use${NC}"
-    echo -e "${YELLOW}🔄 Attempting to free the port...${NC}"
-    lsof -ti:$CHROME_DEBUG_PORT | xargs kill -9 || true
-    sleep 2
-fi
+# Clean up any existing Chrome processes
+echo -e "${YELLOW}🔄 Cleaning up existing Chrome processes...${NC}"
+pkill -f "Google Chrome.*remote-debugging-port" 2>/dev/null || true
+pkill -f "Google Chrome.*user-data-dir.*debug" 2>/dev/null || true
+pkill -f "chrome.*remote-debugging-port" 2>/dev/null || true
+pkill -f "chrome.*user-data-dir.*debug" 2>/dev/null || true
 
-# Kill any existing Chrome processes
-echo -e "${YELLOW}🔄 Closing existing Chrome processes...${NC}"
-pkill -f "Google Chrome" || true
+# Wait for processes to terminate
 sleep 3
 
-# Verify Chrome is closed
-if pgrep -f "Google Chrome" > /dev/null; then
-    echo -e "${YELLOW}⚠️ Chrome processes still running, force killing...${NC}"
-    pkill -9 -f "Google Chrome" || true
-    sleep 2
-fi
+# Create debug profile directory
+echo -e "${YELLOW}📁 Setting up debug profile...${NC}"
+rm -rf "$DEBUG_PROFILE_DIR"
+mkdir -p "$DEBUG_PROFILE_DIR"
 
-# Start Chrome with debugging
-echo -e "${GREEN}🔧 Starting Chrome with debug profile...${NC}"
+# Find available port
+while lsof -Pi :$CHROME_DEBUG_PORT -sTCP:LISTEN -t >/dev/null 2>&1; do
+    CHROME_DEBUG_PORT=$((CHROME_DEBUG_PORT + 1))
+done
+
+echo -e "${GREEN}✅ Using debug port: $CHROME_DEBUG_PORT${NC}"
+
+# Start Chrome with safe debugging configuration
+echo -e "${GREEN}🔧 Starting Chrome with safe debug profile...${NC}"
 "$CHROME_BINARY" \
     --user-data-dir="$DEBUG_PROFILE_DIR" \
     --remote-debugging-port=$CHROME_DEBUG_PORT \
@@ -85,9 +86,19 @@ echo -e "${GREEN}🔧 Starting Chrome with debug profile...${NC}"
     --remote-allow-origins=* \
     --disable-background-mode \
     --disable-component-extensions-with-background-pages \
+    --disable-translate \
+    --hide-scrollbars \
+    --no-pings \
+    --no-zygote \
+    --single-process \
+    --disable-setuid-sandbox \
+    --disable-features=TranslateUI \
+    --disable-ipc-flooding-protection \
+    --disable-background-networking \
+    --disable-sync \
     --disable-default-apps \
     --disable-extensions \
-    --disable-sync \
+    --disable-plugins \
     --disable-translate \
     --hide-scrollbars \
     --mute-audio \
@@ -97,24 +108,35 @@ echo -e "${GREEN}🔧 Starting Chrome with debug profile...${NC}"
     --single-process \
     "$CHROME_DEBUG_URL" &
 
+CHROME_PID=$!
+
 # Wait for Chrome to start
 echo -e "${YELLOW}⏳ Waiting for Chrome to start...${NC}"
 sleep 5
 
-# Check if Chrome is running
-if pgrep -f "Google Chrome" > /dev/null; then
+# Verify Chrome started successfully
+if ps -p $CHROME_PID > /dev/null; then
     echo -e "${GREEN}✅ Chrome started successfully with debugging enabled${NC}"
     echo -e "${BLUE}🌐 Debug URL: http://localhost:$CHROME_DEBUG_PORT${NC}"
     echo -e "${BLUE}🎯 Target URL: $CHROME_DEBUG_URL${NC}"
     echo -e "${YELLOW}💡 You can now attach VS Code debugger to this Chrome instance${NC}"
     
-    # Test debug port
+    # Test debug port availability
+    echo -e "${YELLOW}🧪 Testing debug port...${NC}"
     if curl -s "http://localhost:$CHROME_DEBUG_PORT/json" > /dev/null; then
-        echo -e "${GREEN}✅ Debug port is responding${NC}"
+        echo -e "${GREEN}✅ Debug port is responding correctly${NC}"
     else
-        echo -e "${YELLOW}⚠️ Debug port may not be ready yet${NC}"
+        echo -e "${YELLOW}⚠️ Debug port may not be ready yet, please wait...${NC}"
     fi
+    
+    # Keep script running and handle cleanup
+    echo -e "${BLUE}🔄 Chrome is running. Press Ctrl+C to stop...${NC}"
+    trap "echo -e '${YELLOW}🛑 Stopping Chrome...${NC}'; kill $CHROME_PID 2>/dev/null; rm -rf '$DEBUG_PROFILE_DIR'; exit" INT TERM
+    
+    # Wait for Chrome process
+    wait $CHROME_PID
 else
     echo -e "${RED}❌ Failed to start Chrome${NC}"
+    echo -e "${YELLOW}💡 Try running: ./cleanup-debug-profiles.sh${NC}"
     exit 1
 fi
