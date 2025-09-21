@@ -61,3 +61,6 @@ Thumbs.db
 *.temp 
 chrome-*
 trace
+
+.env.api
+.env.ui

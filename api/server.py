@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 # Add the parent directory to the path to import the SDK
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Load environment variables from project root .env
+# Load environment variables from project root .env (optional)
 from dotenv import load_dotenv
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,11 +40,12 @@ env_path = os.path.join(project_root, ".env")
 if os.path.exists(env_path):
     load_dotenv(env_path)
     print(f"✅ Loaded environment variables from {env_path}")
-    print(f"🔍 GROQ_API_KEY: {'SET' if os.getenv('GROQ_API_KEY') else 'NOT SET'}")
-    print(f"🔍 HF_TOKEN: {'SET' if os.getenv('HF_TOKEN') else 'NOT SET'}")
 else:
-    print(f"⚠️  Environment file not found: {env_path}")
-    print("💡 Create a .env file in the project root using .env.template as a guide")
+    print(f"ℹ️  No .env file found at {env_path} - using environment variables from Docker/system")
+
+# Check if required environment variables are set
+print(f"🔍 GROQ_API_KEY: {'SET' if os.getenv('GROQ_API_KEY') else 'NOT SET'}")
+print(f"🔍 HF_TOKEN: {'SET' if os.getenv('HF_TOKEN') else 'NOT SET'}")
 
 # Import groq_speech after adding to path
 from groq_speech import (
@@ -904,11 +905,13 @@ async def vad_get_audio_level(request: VADRequest):
 
 
 if __name__ == "__main__":
-    # Load API-specific environment variables
+    # Load API-specific environment variables (optional)
     api_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if os.path.exists(api_env_path):
         load_dotenv(api_env_path)
         print(f"✅ Loaded API-specific environment variables from {api_env_path}")
+    else:
+        print(f"ℹ️  No API-specific .env file found - using environment variables from Docker/system")
     
     # Get API configuration from environment variables
     api_host = os.getenv("API_HOST", "0.0.0.0")

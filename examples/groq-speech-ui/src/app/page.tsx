@@ -54,10 +54,6 @@ export default function Home() {
         
         // Check logging status after a delay
         setTimeout(() => {
-            const logHistory = JSON.parse(localStorage.getItem('frontend-log-history') || '[]');
-            const successHistory = JSON.parse(localStorage.getItem('frontend-log-success') || '[]');
-            const failureHistory = JSON.parse(localStorage.getItem('frontend-log-failures') || '[]');
-            
             console.log('=== FRONTEND LOGGING STATUS ===');
         }, 3000);
     }, []);

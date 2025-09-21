@@ -1,34 +1,14 @@
-version: '3.8'
-
 services:
-  # Main API Server (FastAPI) - Required for groq-speech-ui
+  # Groq Speech API Server
   groq-speech-api:
     build:
       context: ../..
-      dockerfile: deployment/docker/Dockerfile
+      dockerfile: deployment/docker/Dockerfile.api
     container_name: groq-speech-api
     ports:
       - "8000:8000"
-    environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - HF_TOKEN=${HF_TOKEN}
-      - GROQ_API_BASE=${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}
-      - GROQ_MODEL_ID=${GROQ_MODEL_ID:-whisper-large-v3}
-      - GROQ_TEMPERATURE=${GROQ_TEMPERATURE:-0.0}
-      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
-      - AUDIO_CHANNELS=${AUDIO_CHANNELS:-1}
-      - MAX_AUDIO_FILE_SIZE=${MAX_AUDIO_FILE_SIZE:-25000000}
-      - DIARIZATION_MIN_SEGMENT_DURATION=${DIARIZATION_MIN_SEGMENT_DURATION:-2.0}
-      - DIARIZATION_SILENCE_THRESHOLD=${DIARIZATION_SILENCE_THRESHOLD:-0.8}
-      - DIARIZATION_MAX_SEGMENTS_PER_CHUNK=${DIARIZATION_MAX_SEGMENTS_PER_CHUNK:-8}
-      - DIARIZATION_CHUNK_STRATEGY=${DIARIZATION_CHUNK_STRATEGY:-adaptive}
-      - DIARIZATION_MAX_SPEAKERS=${DIARIZATION_MAX_SPEAKERS:-5}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - ENVIRONMENT=${ENVIRONMENT:-production}
-    volumes:
-      - ../../logs:/app/logs
-      - ../../temp:/app/temp
-      - ../../uploads:/app/uploads
+    env_file:
+      - .env.api
     networks:
       - groq-speech-network
     restart: unless-stopped
@@ -38,63 +18,30 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    command: ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8000"]
 
-  # Redis for caching and session management (optional but recommended)
-  redis:
-    image: redis:7-alpine
-    container_name: groq-speech-redis
+  # Groq Speech UI
+  groq-speech-ui:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.ui
+    container_name: groq-speech-ui
     ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+      - "3443:3443"
+    env_file:
+      - .env.ui
     networks:
       - groq-speech-network
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    depends_on:
+      groq-speech-api:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost:3443/"]
       interval: 30s
       timeout: 10s
       retries: 3
-
-  # Development service (for local development)
-  groq-speech-dev:
-    build:
-      context: ../..
-      dockerfile: deployment/docker/Dockerfile.dev
-    container_name: groq-speech-dev
-    ports:
-      - "8001:8000"
-    environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - HF_TOKEN=${HF_TOKEN}
-      - GROQ_API_BASE=${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}
-      - GROQ_MODEL_ID=${GROQ_MODEL_ID:-whisper-large-v3}
-      - GROQ_TEMPERATURE=${GROQ_TEMPERATURE:-0.0}
-      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
-      - AUDIO_CHANNELS=${AUDIO_CHANNELS:-1}
-      - MAX_AUDIO_FILE_SIZE=${MAX_AUDIO_FILE_SIZE:-25000000}
-      - DIARIZATION_MIN_SEGMENT_DURATION=${DIARIZATION_MIN_SEGMENT_DURATION:-2.0}
-      - DIARIZATION_SILENCE_THRESHOLD=${DIARIZATION_SILENCE_THRESHOLD:-0.8}
-      - DIARIZATION_MAX_SEGMENTS_PER_CHUNK=${DIARIZATION_MAX_SEGMENTS_PER_CHUNK:-8}
-      - DIARIZATION_CHUNK_STRATEGY=${DIARIZATION_CHUNK_STRATEGY:-adaptive}
-      - DIARIZATION_MAX_SPEAKERS=${DIARIZATION_MAX_SPEAKERS:-5}
-      - LOG_LEVEL=DEBUG
-      - ENVIRONMENT=development
-    volumes:
-      - ../../:/app
-      - ../../logs:/app/logs
-    networks:
-      - groq-speech-network
-    restart: unless-stopped
-    profiles:
-      - dev
+      start_period: 30s
 
 networks:
   groq-speech-network:
     driver: bridge
-
-volumes:
-  redis_data:
-    driver: local

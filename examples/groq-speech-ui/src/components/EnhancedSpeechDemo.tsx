@@ -3,7 +3,6 @@
 import { GroqAPIClient } from '@/lib/groq-api';
 import { PerformanceMetrics, RecognitionResult, DiarizationResult } from '@/types';
 import { uiLogger, audioLogger, apiLogger } from '@/lib/frontend-logger';
-import { audioConverter } from '@/lib/audio-converter';
 import { ContinuousAudioRecorder } from '@/lib/continuous-audio-recorder';
 import { RawPCMRecorder } from '@/lib/raw-pcm-recorder';
 import {
@@ -490,8 +489,8 @@ export const EnhancedSpeechDemo: React.FC<EnhancedSpeechDemoProps> = () => {
                 diarization: currentConfig?.diarization
             });
 
-            // Analyze audio quality before API call
-            const audioAnalysis = analyzeAudioQuality(pcmData, sampleRate, 'Before API Call');
+            // Analyze audio quality before API call (for debugging)
+            analyzeAudioQuality(pcmData, sampleRate, 'Before API Call');
 
             // Convert Float32Array to regular array for JSON serialization - EXACTLY like speech_demo.py
             // Use chunked conversion to avoid stack overflow for large arrays

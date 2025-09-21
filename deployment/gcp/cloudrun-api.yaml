@@ -1,0 +1,97 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: groq-speech-api
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/execution-environment: gen2
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/minScale: "0"
+    spec:
+      containerConcurrency: 10
+      timeoutSeconds: 300
+      containers:
+      - name: groq-speech-api
+        image: gcr.io/PROJECT_ID/groq-speech-api:latest
+        ports:
+        - name: http1
+          containerPort: 8000
+        env:
+        # Required API credentials
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: groq-speech-secrets
+              key: groq-api-key
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: groq-speech-secrets
+              key: hf-token
+        # API configuration
+        - name: GROQ_API_BASE
+          value: "https://api.groq.com/openai/v1"
+        - name: GROQ_MODEL_ID
+          value: "whisper-large-v3"
+        - name: GROQ_TEMPERATURE
+          value: "0.0"
+        # Audio configuration
+        - name: AUDIO_SAMPLE_RATE
+          value: "16000"
+        - name: AUDIO_CHANNELS
+          value: "1"
+        - name: MAX_AUDIO_FILE_SIZE
+          value: "25000000"
+        # Diarization configuration
+        - name: DIARIZATION_MIN_SEGMENT_DURATION
+          value: "2.0"
+        - name: DIARIZATION_SILENCE_THRESHOLD
+          value: "0.8"
+        - name: DIARIZATION_MAX_SEGMENTS_PER_CHUNK
+          value: "8"
+        - name: DIARIZATION_CHUNK_STRATEGY
+          value: "adaptive"
+        - name: DIARIZATION_MAX_SPEAKERS
+          value: "5"
+        # Server configuration
+        - name: API_HOST
+          value: "0.0.0.0"
+        - name: API_PORT
+          value: "8000"
+        - name: API_WORKERS
+          value: "1"
+        - name: API_LOG_LEVEL
+          value: "info"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: ENVIRONMENT
+          value: "production"
+        resources:
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
