@@ -7,12 +7,15 @@ This directory contains a clean, simplified Docker setup for deploying the Groq 
 - **API Container**: FastAPI server with Groq Speech SDK
 - **UI Container**: Next.js frontend application
 - **Network**: Both containers communicate via Docker network
+- **GPU Support**: Optional NVIDIA GPU acceleration for diarization
 
 ## 📁 Files
 
 - `Dockerfile.api` - Optimized API container
 - `Dockerfile.ui` - Optimized UI container  
-- `docker-compose.yml` - Local development setup
+- `docker-compose.yml` - Standard deployment setup
+- `docker-compose.gpu.yml` - GPU-enabled deployment
+- `docker-compose.dev.yml` - Development with hot reload
 - `env.api.template` - API environment variables template
 - `env.ui.template` - UI environment variables template
 - `deploy-local.sh` - Local deployment script
@@ -41,8 +44,14 @@ nano .env.ui
 ### 2. Deploy locally
 
 ```bash
-# Run the deployment script
-./deployment/docker/deploy-local.sh
+# Standard deployment
+docker-compose -f deployment/docker/docker-compose.yml up
+
+# GPU-enabled deployment
+docker-compose -f deployment/docker/docker-compose.gpu.yml up
+
+# Development with hot reload
+docker-compose -f deployment/docker/docker-compose.dev.yml up
 ```
 
 This will:
@@ -59,13 +68,32 @@ This will:
 
 **Note**: The UI uses HTTPS for microphone access. Your browser will show a security warning for the self-signed certificate. Click "Advanced" and "Proceed to localhost" to continue.
 
+### 4. Check GPU support (if using GPU deployment)
+
+```bash
+# Check GPU availability
+docker-compose -f deployment/docker/docker-compose.gpu.yml exec api python test_gpu_support.py
+
+# Expected output
+✅ CUDA available: True
+✅ PyTorch CUDA: True
+✅ GPU count: 1
+✅ GPU name: NVIDIA GeForce RTX 4090
+```
+
 ## 🛠️ Manual Commands
 
 ### Build and run with Docker Compose
 
 ```bash
-# Build and start services
+# Standard deployment
 docker-compose -f deployment/docker/docker-compose.yml up --build -d
+
+# GPU-enabled deployment
+docker-compose -f deployment/docker/docker-compose.gpu.yml up --build -d
+
+# Development with hot reload
+docker-compose -f deployment/docker/docker-compose.dev.yml up --build -d
 
 # View logs
 docker-compose -f deployment/docker/docker-compose.yml logs -f
@@ -88,6 +116,9 @@ docker run -p 8000:8000 --env-file .env groq-speech-api
 
 # Run UI (HTTPS)
 docker run -p 3443:3443 -e NEXT_PUBLIC_API_URL=http://localhost:8000 groq-speech-ui
+
+# Run with GPU support
+docker run --gpus all -p 8000:8000 --env-file .env groq-speech-api
 ```
 
 ## 🔧 Configuration
@@ -156,7 +187,13 @@ docker-compose -f deployment/docker/docker-compose.yml logs groq-speech-ui
 
 ## 🚀 Production Deployment
 
-For production deployment to GCP Cloud Run, see the `../gcp/` directory.
+For production deployment to GCP Cloud Run or GKE, see the `../gcp/` directory.
+
+### **Deployment Options:**
+- **GCP Cloud Run**: Serverless deployment with auto-scaling
+- **GKE GPU**: Kubernetes deployment with GPU acceleration
+- **Docker Swarm**: Container orchestration for on-premises
+- **Kubernetes**: Self-managed Kubernetes deployment
 
 ## 📊 Monitoring
 
@@ -165,3 +202,6 @@ The containers include health checks and logging:
 - **API Health**: `/health` endpoint
 - **API Docs**: `/docs` endpoint
 - **Logs**: Available via `docker logs` or docker-compose logs
+- **GPU Status**: Available via `test_gpu_support.py` script
+- **Performance Metrics**: Built-in performance monitoring
+- **Error Tracking**: Comprehensive error logging and reporting

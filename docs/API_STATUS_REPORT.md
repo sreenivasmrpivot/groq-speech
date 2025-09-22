@@ -2,8 +2,8 @@
 
 ## 📊 **Current API Status**
 
-**Last Updated**: 2024-01-15  
-**API Version**: 1.0.0  
+**Last Updated**: 2025-01-15  
+**API Version**: 2.1.0  
 **Status**: ✅ **FULLY OPERATIONAL**
 
 ## 🔌 **API Endpoints Status**
@@ -181,10 +181,16 @@
 - **GPU Support**: CUDA acceleration
 - **Health Checks**: Comprehensive monitoring
 
-### **Cloud Run** ✅ **ACTIVE**
-- **GCP Cloud Run**: Scalable deployment
-- **GPU Support**: T4 GPU acceleration
-- **Auto-scaling**: Based on demand
+### **GCP Cloud Run** ✅ **ACTIVE**
+- **Serverless Deployment**: Auto-scaling based on demand
+- **CPU Processing**: Fast deployment, slower diarization
+- **Pay-per-use**: Cost-effective for variable workloads
+
+### **GKE GPU** ✅ **ACTIVE**
+- **Kubernetes Deployment**: Full container orchestration
+- **GPU Acceleration**: NVIDIA T4 GPUs for fast diarization
+- **High Availability**: Multi-zone deployment
+- **Custom Scaling**: Fine-grained resource control
 
 ## 🔍 **Monitoring & Health Checks**
 
@@ -231,7 +237,16 @@ curl http://localhost:8000/health
 
 ## 🔄 **Recent Updates**
 
-### **v1.0.0** (2024-01-15)
+### **v2.1.0** (2025-01-15)
+- ✅ **Production Deployment**: GCP Cloud Run and GKE deployment options
+- ✅ **3-Layer Architecture**: CLI, API, and UI with clear separation
+- ✅ **Client-Side VAD**: Real-time silence detection for better performance
+- ✅ **Unified Components**: Single classes for multiple processing modes
+- ✅ **GPU Support**: Automatic CUDA detection and usage
+- ✅ **Performance**: Optimized for both short and long audio
+- ✅ **Documentation**: Comprehensive documentation update
+
+### **v2.0.0** (2024-01-15)
 - ✅ **Client-Side VAD**: Real-time silence detection
 - ✅ **Unified Components**: Single classes for multiple modes
 - ✅ **GPU Support**: Automatic CUDA detection
@@ -275,5 +290,5 @@ curl http://localhost:8000/health
 ---
 
 **Status**: ✅ **FULLY OPERATIONAL**  
-**Last Updated**: 2024-01-15  
-**Next Review**: 2024-02-15
+**Last Updated**: 2025-01-15  
+**Next Review**: 2025-02-15

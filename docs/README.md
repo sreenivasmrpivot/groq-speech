@@ -80,7 +80,8 @@ The Groq Speech SDK is a comprehensive speech recognition and translation system
 ### **Deployment Options**
 - ✅ **Local Development** - Docker Compose with hot reload
 - ✅ **Production** - Docker containers with GPU support
-- ✅ **Cloud Run** - GCP Cloud Run with GPU acceleration
+- ✅ **GCP Cloud Run** - Serverless deployment with auto-scaling
+- ✅ **GKE GPU** - Kubernetes deployment with GPU acceleration
 
 ## 📊 **Current Status**
 
@@ -91,12 +92,15 @@ The Groq Speech SDK is a comprehensive speech recognition and translation system
 - **VAD Processing**: Client-side real-time silence detection
 - **Diarization**: GPU-accelerated speaker diarization
 - **Translation**: Multi-language translation support
+- **Production Deployment**: GCP Cloud Run and GKE deployment options
+- **Docker Support**: Local development and production containers
 
 ### **Performance**
 - **CLI**: Direct SDK access, no network overhead
 - **Web UI**: Client-side VAD for real-time processing
 - **API**: REST API with efficient audio processing
 - **GPU**: Automatic CUDA detection and usage
+- **Cloud**: Auto-scaling and pay-per-use deployment
 
 ## 🔧 **Technical Highlights**
 
@@ -143,13 +147,23 @@ docker-compose -f deployment/docker/docker-compose.yml up
 
 # GPU-enabled deployment
 docker-compose -f deployment/docker/docker-compose.gpu.yml up
+
+# Development with hot reload
+docker-compose -f deployment/docker/docker-compose.dev.yml up
 ```
 
 ### **3. Cloud Run Deployment**
 ```bash
-# Deploy to GCP Cloud Run
+# Deploy to GCP Cloud Run (CPU only)
 cd deployment/gcp
 ./deploy.sh
+```
+
+### **4. GKE GPU Deployment**
+```bash
+# Deploy to GKE with GPU support
+cd deployment/gcp
+./deploy-simple-gke.sh
 ```
 
 ## 🤝 **Contributing**
@@ -168,6 +182,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - Add comprehensive documentation
 - Include tests for new features
 - Update documentation as needed
+- Test with both CLI and web interfaces
+- Verify deployment options work correctly
 
 ## 📞 **Support**
 
@@ -175,6 +191,8 @@ For issues and questions:
 1. Check the [documentation](.) for answers
 2. Review [existing issues](https://github.com/your-repo/issues)
 3. Create a new issue with detailed information
+4. Check the [debugging guide](DEBUGGING_GUIDE.md) for development issues
+5. Review the [API status report](API_STATUS_REPORT.md) for current status
 
 ## 📄 **License**
 
@@ -183,3 +201,30 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ---
 
 **Built with ❤️ using Groq, Pyannote.audio, and modern web technologies.**
+
+## 🎯 **Quick Reference**
+
+### **Common Commands**
+```bash
+# CLI usage
+python examples/speech_demo.py --file audio.wav --diarize
+
+# Start web UI
+cd api && python server.py &
+cd examples/groq-speech-ui && npm run dev
+
+# Docker deployment
+docker-compose -f deployment/docker/docker-compose.yml up
+
+# Cloud Run deployment
+cd deployment/gcp && ./deploy.sh
+
+# GKE GPU deployment
+cd deployment/gcp && ./deploy-simple-gke.sh
+```
+
+### **Key URLs**
+- **Local API**: http://localhost:8000
+- **Local UI**: https://localhost:3443
+- **API Docs**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/health

@@ -6,7 +6,8 @@ The Groq Speech SDK supports multiple deployment options:
 
 1. **Local Development** - Docker Compose with hot reload
 2. **Production** - Docker containers with GPU support
-3. **Cloud Run** - GCP Cloud Run with GPU acceleration
+3. **GCP Cloud Run** - Serverless deployment with auto-scaling
+4. **GKE GPU** - Kubernetes deployment with GPU acceleration
 
 ## 🐳 **Docker Deployment**
 
@@ -67,6 +68,21 @@ docker-compose -f deployment/docker/docker-compose.dev.yml up
 - **Volume Mounts**: Local code changes reflected immediately
 - **Debug Mode**: Enhanced logging and error reporting
 
+### **4. Production Deployment**
+```bash
+# Production deployment with GPU support
+docker-compose -f deployment/docker/docker-compose.gpu.yml up
+
+# Check GPU availability
+docker-compose -f deployment/docker/docker-compose.gpu.yml exec api python test_gpu_support.py
+```
+
+**Production Features:**
+- **GPU Support**: CUDA acceleration for diarization
+- **Health Checks**: Comprehensive monitoring
+- **Security**: Non-root containers and minimal images
+- **Performance**: Optimized for production workloads
+
 ## ☁️ **GCP Cloud Run Deployment**
 
 ### **Prerequisites**
@@ -74,53 +90,38 @@ docker-compose -f deployment/docker/docker-compose.dev.yml up
 - GCP project with Cloud Run API enabled
 - Docker registry access (Artifact Registry)
 
-### **1. Build and Push Images**
+### **Quick Deployment**
 ```bash
-# Build API server image
-docker build -f deployment/docker/Dockerfile.gpu -t gcr.io/PROJECT_ID/groq-speech-api .
-
-# Build frontend image
-cd examples/groq-speech-ui
-docker build -t gcr.io/PROJECT_ID/groq-speech-ui .
-
-# Push to registry
-docker push gcr.io/PROJECT_ID/groq-speech-api
-docker push gcr.io/PROJECT_ID/groq-speech-ui
+# Deploy to Cloud Run (CPU only)
+cd deployment/gcp
+./deploy.sh
 ```
 
-### **2. Deploy to Cloud Run**
-```bash
-# Deploy API server
-gcloud run deploy groq-speech-api \
-  --image gcr.io/PROJECT_ID/groq-speech-api \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --memory 4Gi \
-  --cpu 2 \
-  --gpu 1 \
-  --gpu-type nvidia-tesla-t4
+**Features:**
+- **Auto-scaling**: Automatically scales based on demand
+- **Pay-per-use**: Only pay for actual usage
+- **Global deployment**: Deploy to multiple regions
+- **Integrated monitoring**: Built-in logging and monitoring
 
-# Deploy frontend
-gcloud run deploy groq-speech-ui \
-  --image gcr.io/PROJECT_ID/groq-speech-ui \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --memory 1Gi \
-  --cpu 1
+## 🚀 **GKE GPU Deployment**
+
+### **Prerequisites**
+- Google Cloud SDK installed
+- GCP project with GKE API enabled
+- Docker registry access (Artifact Registry)
+
+### **Quick Deployment**
+```bash
+# Deploy to GKE with GPU support
+cd deployment/gcp
+./deploy-simple-gke.sh
 ```
 
-### **3. Configure Environment Variables**
-```bash
-# Set API server environment
-gcloud run services update groq-speech-api \
-  --set-env-vars GROQ_API_KEY=your_groq_api_key,HF_TOKEN=your_huggingface_token
-
-# Set frontend environment
-gcloud run services update groq-speech-ui \
-  --set-env-vars NEXT_PUBLIC_API_URL=https://groq-speech-api-xxx.run.app
-```
+**Features:**
+- **GPU acceleration**: NVIDIA T4 GPUs for fast diarization
+- **Kubernetes orchestration**: Full container orchestration
+- **High availability**: Multi-zone deployment
+- **Custom scaling**: Fine-grained control over resources
 
 ## 🔧 **Configuration Options**
 
@@ -328,6 +329,17 @@ docker-compose logs frontend | grep "build"
 - **GPU Usage**: Monitor with `nvidia-smi`
 - **Memory Usage**: Monitor with `docker stats`
 
+### **Cloud Monitoring**
+```bash
+# Cloud Run logs
+gcloud run services logs read groq-speech-api --region=us-central1
+gcloud run services logs read groq-speech-ui --region=us-central1
+
+# GKE logs
+kubectl logs -l app=groq-speech-api
+kubectl logs -l app=groq-speech-ui
+```
+
 ## 🚨 **Troubleshooting**
 
 ### **Common Issues**
@@ -412,7 +424,7 @@ cp deployment/docker/docker-compose*.yml ./backup/
 
 ## 📈 **Scaling**
 
-### **Horizontal Scaling**
+### **Docker Scaling**
 ```yaml
 # Scale API server
 services:
@@ -421,6 +433,26 @@ services:
       replicas: 3
     ports:
       - "8000-8002:8000"
+```
+
+### **Cloud Run Scaling**
+```bash
+# Auto-scaling is built-in
+# Min instances: 1
+# Max instances: 10
+# Scales based on demand
+```
+
+### **GKE Scaling**
+```bash
+# Scale API deployment
+kubectl scale deployment groq-speech-api --replicas=3
+
+# Scale UI deployment
+kubectl scale deployment groq-speech-ui --replicas=2
+
+# Auto-scaling (if enabled)
+kubectl autoscale deployment groq-speech-api --min=1 --max=5 --cpu-percent=70
 ```
 
 ### **Load Balancing**

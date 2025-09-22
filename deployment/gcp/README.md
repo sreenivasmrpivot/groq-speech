@@ -13,7 +13,7 @@ cd deployment/gcp
 ### Option 2: GKE with GPU (for fast diarization)
 ```bash
 cd deployment/gcp
-./deploy-gke.sh
+./deploy-simple-gke.sh
 ```
 
 ## 📋 Prerequisites
@@ -55,11 +55,11 @@ cd deployment/gcp
 
 ```
 deployment/gcp/
-├── deploy.sh           # Cloud Run deployment (CPU)
-├── deploy-gke.sh       # GKE deployment (GPU)
-├── setup-env.sh        # Environment setup
-├── env.template        # Environment template
-└── README.md          # This file
+├── deploy.sh                    # Cloud Run deployment (CPU)
+├── deploy-simple-gke.sh         # GKE deployment (GPU)
+├── deploy-cloudrun-simple.sh    # Alternative Cloud Run deployment
+├── env.template                 # Environment template
+└── README.md                   # This file
 ```
 
 ## 🔍 How It Works
@@ -100,6 +100,17 @@ kubectl logs -l app=groq-speech-api
 kubectl logs -l app=groq-speech-ui
 ```
 
+### Access services:
+```bash
+# Cloud Run (public access)
+# API: https://groq-speech-api-xxx.run.app
+# UI: https://groq-speech-ui-xxx.run.app
+
+# GKE (external IP)
+kubectl get service groq-speech-ui
+# Access via external IP on port 80
+```
+
 ## 🚨 Troubleshooting
 
 ### Common Issues:
@@ -115,6 +126,10 @@ gcloud run services delete groq-speech-ui --region=us-central1
 
 # GKE
 gcloud container clusters delete $CLUSTER_NAME --zone=$ZONE
+
+# Clean up secrets
+gcloud secrets delete groq-api-key
+gcloud secrets delete hf-token
 ```
 
 ## 💡 Why This Approach?

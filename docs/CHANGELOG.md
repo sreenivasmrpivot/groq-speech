@@ -2,6 +2,80 @@
 
 All notable changes to the Groq Speech SDK project will be documented in this file.
 
+## [2.1.0] - 2025-01-15
+
+### 🎉 Major Release - Production-Ready Platform
+
+This release represents a complete transformation of the Groq Speech SDK, introducing comprehensive real-world demos, production-ready API server, and enhanced deployment architecture.
+
+### ✨ Added
+
+#### Production Deployment
+- **GCP Cloud Run Deployment** - Serverless deployment with auto-scaling
+- **GKE GPU Deployment** - Kubernetes deployment with GPU acceleration
+- **Docker Compose** - Local development with hot reload
+- **Environment Management** - Centralized configuration with `.env` files
+
+#### Enhanced Architecture
+- **3-Layer Architecture** - CLI, API, and UI layers with clear separation
+- **Client-Side VAD** - Real-time voice activity detection for better performance
+- **Unified Components** - Single classes for multiple processing modes
+- **REST API Only** - Simplified architecture without WebSocket complexity
+
+#### Advanced Features
+- **Speaker Diarization** - Multi-speaker detection with Pyannote.audio
+- **GPU Acceleration** - CUDA support for fast diarization processing
+- **Intelligent Chunking** - Automatic handling of large audio files
+- **Real-time Processing** - Continuous microphone processing with VAD
+
+#### Developer Experience
+- **Comprehensive Documentation** - Updated architecture and deployment guides
+- **API Reference** - Complete SDK documentation
+- **Testing Guide** - Postman collection for API testing
+- **Debugging Guide** - Safe debugging options for development
+
+### 🔄 Changed
+
+#### Architecture Improvements
+- **Simplified API** - Removed WebSocket endpoints, focused on REST
+- **Unified Audio Processing** - Single components for multiple modes
+- **Client-Side VAD** - Moved from server-side to client-side for real-time performance
+- **Configuration Management** - Centralized with factory methods
+
+#### Deployment Enhancements
+- **Docker Optimization** - Multi-stage builds for smaller images
+- **Cloud Integration** - GCP Cloud Run and GKE deployment options
+- **Environment Variables** - Centralized configuration management
+- **Health Checks** - Comprehensive monitoring and health endpoints
+
+### 🗑️ Removed
+
+#### Cleaned Up Components
+- **WebSocket Endpoints** - Removed in favor of REST API
+- **Redundant Examples** - Cleaned up outdated demo files
+- **Complex Configuration** - Simplified environment management
+- **Unused Dependencies** - Removed unnecessary packages
+
+### 🛠️ Technical Improvements
+
+#### Performance
+- **Client-Side VAD** - Zero latency for real-time decisions
+- **Unified Components** - Reduced code duplication
+- **Memory Management** - Optimized for both short and long audio
+- **GPU Support** - Automatic detection and usage
+
+#### Reliability
+- **Error Handling** - Comprehensive error responses
+- **Health Monitoring** - Built-in health checks
+- **Logging** - Structured logging throughout
+- **Testing** - Comprehensive test coverage
+
+#### Security
+- **API Key Management** - Secure secret handling
+- **Input Validation** - Comprehensive request validation
+- **CORS Configuration** - Proper cross-origin handling
+- **Container Security** - Non-root containers and minimal images
+
 ## [2.0.0] - 2024-01-01
 
 ### 🎉 Major Release - Complete Architecture Overhaul
