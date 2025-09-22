@@ -32,24 +32,27 @@ gcloud services enable run.googleapis.com secretmanager.googleapis.com
 
 # Create secrets
 echo -e "${BLUE}[INFO]${NC} Creating secrets..."
-if gcloud secrets describe groq-api-key >/dev/null 2>&1; then
-    echo -e "${YELLOW}[WARNING]${NC} groq-api-key secret already exists, updating..."
-    echo -n "$GROQ_API_KEY" | gcloud secrets versions add groq-api-key --data-file=-
+if gcloud secrets describe groq-secrets >/dev/null 2>&1; then
+    echo -e "${YELLOW}[WARNING]${NC} Secret already exists, updating..."
+    gcloud secrets versions add groq-secrets --data-file=- <<EOF
+{
+  "groq-api-key": "$GROQ_API_KEY",
+  "hf-token": "$HF_TOKEN"
+}
+EOF
 else
-    echo -n "$GROQ_API_KEY" | gcloud secrets create groq-api-key --data-file=-
-fi
-
-if gcloud secrets describe hf-token >/dev/null 2>&1; then
-    echo -e "${YELLOW}[WARNING]${NC} hf-token secret already exists, updating..."
-    echo -n "$HF_TOKEN" | gcloud secrets versions add hf-token --data-file=-
-else
-    echo -n "$HF_TOKEN" | gcloud secrets create hf-token --data-file=-
+    gcloud secrets create groq-secrets --data-file=- <<EOF
+{
+  "groq-api-key": "$GROQ_API_KEY",
+  "hf-token": "$HF_TOKEN"
+}
+EOF
 fi
 
 # Deploy API
 echo -e "${BLUE}[INFO]${NC} Deploying API..."
 gcloud run deploy groq-speech-api \
-    --image gcr.io/$PROJECT_ID/groq-speech-api:amd64 \
+    --image gcr.io/$PROJECT_ID/groq-speech-api:local \
     --platform managed \
     --region $REGION \
     --allow-unauthenticated \
@@ -58,7 +61,7 @@ gcloud run deploy groq-speech-api \
     --cpu 4 \
     --min-instances $API_REPLICAS \
     --max-instances 10 \
-    --set-secrets="GROQ_API_KEY=groq-api-key:latest,HF_TOKEN=hf-token:latest" \
+    --set-secrets="GROQ_API_KEY=groq-secrets:groq-api-key,HF_TOKEN=groq-secrets:hf-token" \
     --set-env-vars="GROQ_API_BASE=$GROQ_API_BASE,GROQ_MODEL_ID=$GROQ_MODEL_ID,DIARIZATION_ENABLED_BY_DEFAULT=true"
 
 # Get API URL
@@ -68,7 +71,7 @@ echo -e "${GREEN}[SUCCESS]${NC} API deployed at: $API_URL"
 # Deploy UI
 echo -e "${BLUE}[INFO]${NC} Deploying UI..."
 gcloud run deploy groq-speech-ui \
-    --image gcr.io/$PROJECT_ID/groq-speech-ui:amd64 \
+    --image gcr.io/$PROJECT_ID/groq-speech-ui:local \
     --platform managed \
     --region $REGION \
     --allow-unauthenticated \

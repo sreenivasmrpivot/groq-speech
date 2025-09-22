@@ -64,3 +64,5 @@ trace
 
 .env.api
 .env.ui
+.env.gcp
+deployment/gcp/.env
